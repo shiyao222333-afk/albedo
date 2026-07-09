@@ -80,7 +80,7 @@
 - **T6** 溯源 `core/provenance.py`：从 Nigredo `info` 取 video_id / up_name / source_url / title + 记录 processed_at 📍C6
 - **T7+** 流水线补全 `flows/refine.py`：扩展编排串入 C4→C6，补全 `RefinedKnowledgeObject` 全字段（merits / sop / provenance）+ FPF 轻量 trust_score 📍C1→C7
 - **T11** 批量 / 队列（方案A）：参考 Nigredo 队列机制，支持多条生料并行炼真 📍C1
-- **T12** 人类可读报告渲染 `core/report.py`：从 `RefinedKnowledgeObject` 渲染 Markdown/HTML 鉴定报告（v0.1.0 最小版由 T9 UI 直出，v0.2.0 完整版含全维度 + 引用 + 变现标注）📍C7
+- **T12** 鉴定报告产出 `core/report.py`：炼真的**主交付物**——从内部 `RefinedKnowledgeObject` 渲染人能直接看的 Markdown 鉴定报告（v0.1.0 最小版由 T9 UI 直出，v0.2.0 完整版含全维度 + 引用 + 变现标注）；结构化 JSON 仅留作内部/未来入库用 📍C7
 - **T13** 引用标记 `core/references.py`：抽取书/网址/资料并结构化 `references` 📍C5
 
 ### 已移出 Albedo（归其它项目）
@@ -133,12 +133,12 @@ RefinedKnowledgeObject:
   references: [ { type: "book"|"url"|"video"|"other",
                   value: str,
                   context: str } ]  # 引用标记（书/网址/资料）
-  report: str            # 人类可读鉴定报告(Markdown)，与上面字段同源渲染
+  report: str            # 人类可读鉴定报告(Markdown) —— 炼真对外主交付物；结构化字段为其内部表示
 ```
 
 **下游映射（交熔知时）**：`quality.label` → `epistemic_status`（true→corroborated / suspect→unverified / false→rejected）；`trust_score` → 熔知 payload `trust_score`；`clean_text` 交熔知做分面分类 + 切块 + 向量化 + 入库。
 
-> 版本填充节奏：v0.1.0 仅填 `clean_text` / `quality.truthfulness` / `status` / `monetization.related`（**数据模型从一开始就设计成多维+双输出**，避免 v0.2.0 推倒重来）；v0.1.0 最小报告由 T9 UI 直出；v0.2.0 补全 `quality.copywriting / structure / logic` + `merits` / `sop` / `provenance` / `trust_score` + `references` + `monetization` 全字段 + `report` 完整渲染。`business_line_tags` 已移除（业务线适配评分移出 Albedo）。
+> 版本填充节奏：v0.1.0 仅填 `clean_text` / `quality.truthfulness` / `status` / `monetization.related`（**数据模型从一开始就设计成多维 + 以报告为主交付物**，避免 v0.2.0 推倒重来）；v0.1.0 最小报告由 T9 UI 直出；v0.2.0 补全 `quality.copywriting / structure / logic` + `merits` / `sop` / `provenance` / `trust_score` + `references` + `monetization` 全字段 + `report` 完整渲染。`business_line_tags` 已移除（业务线适配评分移出 Albedo）。
 
 ---
 
