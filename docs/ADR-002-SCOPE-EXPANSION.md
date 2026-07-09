@@ -29,3 +29,10 @@ Accepted（2026-07-09）
 - `BLUEPRINT.md`：质量评估→多维鉴定；内容净化加文本类型说明；输入来源与平台信号段。
 - `FLOWCHART.md`：C1 输入补 text_type/signals；C2 按类型净化；C3 多维评估；接口边界加文本类型感知。
 - `PROJECT_PLAN.md`：借鉴地图补统计学；独特之处 #2 加文本类型感知；版本路线 v0.1.0/v0.2.0 反映多维；数据契约 quality 多维化 + text_type/signals；T1/T2/T3 任务描述更新；验收标准改多维报告。
+
+## 竞品佐证（2026-07-09 补充）
+本次扩张的 4 项决策均有成熟方法/研究可借，非拍脑袋（详见 `docs/ALBEDO-RESEARCH-2026-07-09.md` 11.6/11.7）：
+- **多维鉴定**：TruthfulnessEval（多维真实性）、AIGVQA（多维质量）、Acrolinx/Writer/Grammarly + ETS e-rater（写作质量多维）——但无「真实性+质量」组合，空白即护城河。
+- **统计验真**：NumTemp（数值/时间断言验证）、Cross-Document Fact Verification（跨文档验证）对应「数值自洽 / 跨源共识」。
+- **平台信号**：Viblio（视频可信度信号）精确命中；但须加护栏 **Engagement Is Not Evidence**（互动信号≠真实证据），信号仅作辅助维度。
+- **商业参照**：Logically / FactBox.ai / iWeaver / Winston AI / FactSnap 均为单维真实性核查器，仅作「真实性」一维参照。

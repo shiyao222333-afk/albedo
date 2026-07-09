@@ -10,7 +10,7 @@
 
 ```mermaid
 flowchart TD
-    A["Nigredo 生料<br/>文字(字幕/社媒文案/文档) + 文本类型 + 平台信号包 + info<br/>(video_id / title / up_name / source_url)"] --> B["入站 C1<br/>接收 + 校验"]
+    A["Nigredo 生料<br/>文字(字幕/社媒文案/文档/网页) + 文本类型 + 平台信号包 + info<br/>(video_id / title / up_name / source_url)"] --> B["入站 C1<br/>接收 + 校验"]
     B --> C["内容净化 C2<br/>去广告 / 轻量纠错 / 翻译占位"]
     C --> D{"质量评估 C3<br/>真 / 假 / 可疑"}
     D -->|"虚假"| E["隔离 / 拒入库<br/>(status=rejected)"]
@@ -20,7 +20,7 @@ flowchart TD
     G --> H["结构化提炼 C5<br/>标准 SOP 产出"]
     H --> I["溯源标记 C6<br/>video_id / up / 时间戳"]
     I --> J["精炼知识对象 C7<br/>RefinedKnowledgeObject"]
-    J --> K["落本地 data/out/*.json<br/>未来经接口交熔知"]
+    J --> K["落本地 data/out/*.json + 报告.md<br/>未来经接口交熔知"]
     E --> K
 
     style D fill:#fff3cd,stroke:#d39e00
@@ -35,13 +35,13 @@ flowchart TD
 
 | 节点 | 名称 | 输入 | 输出 | 逻辑 | 对应任务 |
 |---|---|---|---|---|---|
-| C1 | 入站 | Nigredo `process()` 产出的文本（字幕/社媒文案/文档，当前以 B站 为主）+ 文本类型标记 + 平台归一化信号包 + info | `AlbedoInput`（text / text_type / signals / video_id / title / up_name / source_url） | 校验非空、字段归一、按 text_type 选净化/评估策略 | T1 / T7 / T11 |
+| C1 | 入站 | Nigredo `process()` 产出的文本（字幕/社媒文案/文档/网页，当前以 B站 为主）+ 文本类型标记 + 平台归一化信号包 + info | `AlbedoInput`（text / text_type / signals / video_id / title / up_name / source_url） | 校验非空、字段归一、按 text_type 选净化/评估策略 | T1 / T7 / T11 |
 | C2 | 内容净化 | `AlbedoInput.text` + `text_type` | `clean_text` | 按文本类型处理：字幕走 ASR 清洗（去语气词/纠错），结构化文案直提炼；去广告话术（卖课特征模式库）、多语言翻译占位 | T2 |
-| C3 | 质量评估（多维） | `clean_text` + `provenance` + `signals` | `quality{truthfulness, copywriting, structure, logic}` | 分维度评估：真实性（LLM + 统计：跨源共识/数值自洽）驱动 status；文案/结构/逻辑 v0.2.0 补全；signals 作辅助信号 | T3 / T8 |
+| C3 | 质量评估（多维） | `clean_text` + `provenance` + `signals` | `quality{truthfulness, copywriting, structure, logic}` + `monetization{related, category}` | 分维度评估：真实性（LLM + 统计：跨源共识/数值自洽）驱动 status；文案/结构/逻辑 v0.2.0 补全；signals 作辅助信号；同步检测变现相关（复用卖课话术特征） | T3 / T8 |
 | C4 | 优点分析 | `clean_text` | `merits{核心洞察, 可复用步骤, 差异化亮点, 适用场景, 陷阱预警, 迁移成本}` | LLM 结构化萃取 6 子能力 | T4 / T8 |
 | C5 | 结构化提炼 | `clean_text` + `merits.可复用步骤` | `sop{目的, 前置条件, 编号步骤, 警告, 完成清单}` | 对齐 TubeScribed 标准 SOP 格式，保证 Rubedo 可直接消费 | T5 / T8 |
 | C6 | 溯源标记 | Nigredo `info` | `provenance{video_id, up_name, source_url, title, processed_at}` | 精炼阶段即记录来源（天然产物） | T6 |
-| C7 | 精炼知识对象 | C2–C6 全部输出 | `RefinedKnowledgeObject`（含 trust_score + status） | 组装 + 由 quality.label 推 status + FPF 轻量信任分 | T1 / T7 |
+| C7 | 精炼知识对象 | C2–C6 全部输出 | `RefinedKnowledgeObject`（含 trust_score + status + references + monetization + report） | 组装 + 由 quality.label 推 status + FPF 轻量信任分 + 引用标记 + 变现标注 + 渲染人类可读报告 | T1 / T7 / T12 |
 
 ---
 
