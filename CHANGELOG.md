@@ -1,0 +1,28 @@
+# Changelog · 炼真 (Albedo)
+
+本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
+
+## [0.1.0] - Unreleased（代码完成，待 L4 用户验收）
+
+> v0.1.0 目标：单条内容「能不能信」核心闭环——净化 + 真实性评估 + 变现标注 → 入库就绪报告。
+
+### Added
+- **T1 数据契约** `core/models.py`：`AlbedoInput`（对齐 Nigredo `process()` 输出）+ `RefinedKnowledgeObject`（quality 从一开始就设计为多维对象 truthfulness/copywriting/structure/logic，v0.1.0 先填 truthfulness + status）。枚举：TextType / TruthfulnessLabel / EvidenceGrade / Status / MonetizationCategory。
+- **T8 LLM 封装** `core/llm.py`：对齐熔知 `_call_llm_api`（DeepSeek，`KB_LLM_*` env，自动读 `.env`）；`extract_json_block` 花括号深度匹配容错；`call_llm_json` 组合并抛错。
+- **T2 内容净化** `core/purify.py`：按 `text_type` 分支（字幕 ASR 清洗 / 结构化文案规整）+ 卖课话术特征模式库 `detect_sales_features()`（仅标注不删改，保留真实性证据）；多语言翻译占位。
+- **T3 质量评估** `core/assess.py`：
+  - 真实性评估 Prompt（nuwa 三重验证 + anyone-skill L1-L4 证据分级），`assess_truthfulness()` 调 LLM 填 `Truthfulness` 四维；
+  - 数值自洽校验 `check_numeric_consistency()`（轻量规则，中文数字归一 + 过度承诺红色信号 + 同维度矛盾检测，结果注入真实性 Prompt 作补充证据）；
+  - 变现检测 `assess_monetization()`（复用卖课特征，护栏「变现 ≠ 差内容」，related 仅标注不判假）。
+  - `call_llm_json` 改为函数内惰性导入，使评估模块在缺 `requests` 环境也可导入（数值/变现检测不依赖 LLM）。
+- **T7 流水线编排** `flows/refine.py`：`refine()` 串联 C2→C3，由 `quality.truthfulness.label` 推 `status`（true→accepted / suspect→suspect / false→rejected），组装最小 `RefinedKnowledgeObject`；`refine_text()` 便捷封装。
+- **T9 最小 UI + 启动** `app.py` + `run.bat`：Streamlit 界面，粘贴文本 / 导入 Nigredo JSON → 一键炼真 → 展示净化文本 + 真实性 + 入库状态 + 变现标注，支持导出 `.md` 报告与 `.json` 对象；`run.bat` 自动装依赖并开 `http://localhost:8501`。
+
+### 设计决策（详见 docs/ADR-005）
+- 报告以「人能直接看」为主交付物：v0.1.0 由 T9 UI 直出最小报告，v0.2.0 再由 `core/report.py` 完整渲染。
+- 变现标注与真实性结论解耦：卖课话术是真实性评估的**证据之一**，绝不仅凭「在卖课」判 false。
+- 数据模型从 v0.1.0 起即设计为多维 + 入库就绪（`ingestion_meta` 预留），避免 v0.2.0 推倒重来。
+
+### Pending
+- **L4 用户验收**：需在用户本机（有 `requests` + `KB_LLM_API_KEY`）用真实教程 + 卖课谎言两条样例跑通，验证验收标准 §5.3 ①–④。沙箱已通过桩替换完成编排层 / status 映射 / 变现集成单测，真实 LLM 路径待本机验证。
+- **GitHub 推送**：等用户在 github.com 建空仓库 `shiyao222333-afk/albedo`（private，不初始化）后，再 `git remote add` + `push`。

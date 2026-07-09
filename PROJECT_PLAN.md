@@ -119,12 +119,12 @@ Nigredo(馏析·采集) → Albedo(炼真·认知精炼) → Citrinitas(熔知·
 
 ### v0.1.0 验真假核心闭环 [MVP必须]
 
-- **T1** 数据契约 `core/models.py`：定义 `AlbedoInput`（对齐 Nigredo `process()` 输出：text / **text_type** / **signals** / video_id / title / up_name / source_url）+ `RefinedKnowledgeObject`（**quality 从一开始设计成多维对象** truthfulness/copywriting/structure/logic，v0.1.0 先填 truthfulness + status）📍C1/C7
-- **T2** 内容净化 `core/purify.py`：按 `text_type` 处理（字幕走 ASR 清洗去语气词/纠错，结构化文案直提炼）+ 去广告话术（卖课特征模式库）+ 多语言翻译占位 📍C2
-- **T3** 质量评估 `core/assess.py`：LLM 单源评估**真实性维度** → `truthfulness.label(真/假/可疑)` + `reasoning`；借鉴 nuwa 三重验证 + anyone-skill 证据分级；**统计学手段**（数值自洽）作为补充验证；同步检测 `monetization.related`（复用卖课话术特征） 📍C3
-- **T7** 流水线编排（最小）`flows/refine.py`：串联 C2→C3，组装最小 `RefinedKnowledgeObject`，由 quality.label 推 status 📍C1→C7
-- **T8** LLM 调用封装 `core/llm.py`：对齐熔知 `_call_llm_api`（DeepSeek，env 配置 base_url/api_key/model），供 C3 复用 📍C3
-- **T9** 最小 UI `app.py` + `run.bat`：粘贴文本（或选 Nigredo 输出 JSON）→ 一键炼真 → 展示「真假鉴定」📍C7
+- **T1** 数据契约 `core/models.py`：定义 `AlbedoInput`（对齐 Nigredo `process()` 输出：text / **text_type** / **signals** / video_id / title / up_name / source_url）+ `RefinedKnowledgeObject`（**quality 从一开始设计成多维对象** truthfulness/copywriting/structure/logic，v0.1.0 先填 truthfulness + status）📍C1/C7 ✅ 已实现（待 L4 验收）
+- **T2** 内容净化 `core/purify.py`：按 `text_type` 处理（字幕走 ASR 清洗去语气词/纠错，结构化文案直提炼）+ 去广告话术（卖课特征模式库）+ 多语言翻译占位 📍C2 ✅ 已实现（待 L4 验收）
+- **T3** 质量评估 `core/assess.py`：LLM 单源评估**真实性维度** → `truthfulness.label(真/假/可疑)` + `reasoning`；借鉴 nuwa 三重验证 + anyone-skill 证据分级；**统计学手段**（数值自洽）作为补充验证；同步检测 `monetization.related`（复用卖课话术特征） 📍C3 ✅ 已实现（待 L4 验收）
+- **T7** 流水线编排（最小）`flows/refine.py`：串联 C2→C3，组装最小 `RefinedKnowledgeObject`，由 quality.label 推 status 📍C1→C7 ✅ 已实现（待 L4 验收）
+- **T8** LLM 调用封装 `core/llm.py`：对齐熔知 `_call_llm_api`（DeepSeek，env 配置 base_url/api_key/model），供 C3 复用 📍C3 ✅ 已实现（待 L4 验收）
+- **T9** 最小 UI `app.py` + `run.bat`：粘贴文本（或选 Nigredo 输出 JSON）→ 一键炼真 → 展示「真假鉴定」📍C7 ✅ 已实现（待 L4 验收）
 
 ### v0.2.0 完整鉴定报告 + 批量 [MVP延伸]
 
