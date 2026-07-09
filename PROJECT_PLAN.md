@@ -12,7 +12,7 @@
 
 | 我们的能力（MVP） | 借鉴自竞品 / 研究 | 我们的独特处理 |
 |---|---|---|
-| **质量评估**（真/假/可疑 + 0-100 分 + 理由） | **nuwa-skill** 三重验证 + **anyone-skill** L1-L4 证据分级 + **OpenFactCheck** 统一核查管线 | 单源 LLM 实现；**为规模期跨源比对预留接口**；输出直接映射熔知 `epistemic_status` |
+| **质量评估（多维）**（真实性 + 文案 + 结构 + 逻辑 分维度） | **nuwa-skill** 三重验证 + **anyone-skill** L1-L4 证据分级 + **OpenFactCheck** 统一核查管线 + **统计学手段**（跨源共识频率 / 数值自洽 / 离群检测） | 单源 LLM 实现真实性维度；**统计学**为补充验证（MVP 轻量数值自洽，规模期跨源共识）；输出直接映射熔知 `epistemic_status` |
 | **优点分析**（6 子能力） | **skill-from-masters**（方法萃取，非人物萃取）+ **nuwa**（诚实边界=陷阱预警）+ **pangu**（质量验证审计） | **多 SOP 并列产出**（对齐 Rubedo 可消费格式） |
 | **结构化提炼**（标准 SOP） | **TubeScribed**（商业化 SOP 格式：目的+前置+编号步骤+警告+完成清单） | 产出对齐 **Rubedo 可消费格式**，直接进凝华 SOP 建立 |
 | **溯源** | 所有竞品均有来源记录 | 与 Nigredo `video_id` / 时间戳**强绑定**（精炼阶段即知来源） |
@@ -30,8 +30,8 @@
 1. **流水线中段定位（非端到端单人工具）**
    pangu / nuwa / dalio 都是「自己采、自己炼、自己存、自己产 skill」的端到端工具。Albedo 只做**认知精炼中段**，对接 Nigredo（采集）→ Citrinitas（存储）→ Rubedo（变现）。这是本质差异，也避免重造轮子。
 
-2. **平台无关的认知精炼**
-   竞品多绑死单一采集源（如某站视频）。Albedo 只吃「文字」——Nigredo 产出的生料文本，不绑任何平台（B站 / YouTube / 公众号 / 小红书 等皆可）。未来任何来源的文字都能炼，天然适配你多业务线、多采集源的格局。
+2. **平台无关的认知精炼 + 文本类型感知**
+   竞品多绑死单一采集源（如某站视频）。Albedo 只吃「文字」——Nigredo 产出的生料文本，不绑任何平台（B站 / YouTube / 公众号 / 小红书 等皆可）。未来任何来源的文字都能炼，天然适配你多业务线、多采集源的格局。但文字有「类型」之分：口语字幕（零碎、无段落）与条理清晰的文案（小红书笔记、文章）处理方式不同——Albedo 用 `text_type` 标记区分，按类型调整净化与评估策略，不绑平台但认文本类型。平台元数据（播放量/受众/互动）由 Nigredo 归一化为统一信号包传入，Albedo 只吃归一化信号。
 
 3. **多 SOP 并列产出，对接 Rubedo**
    竞品产出「可安装 Skill」；Albedo 产出「**可被执行的标准 SOP**」，直接进凝华（Rubedo）的 SOP 建立环节——贴合你「多个 SOP 并列进行」的工作方式。
@@ -48,9 +48,9 @@
 
 | 版本 | 目标 | 关键能力 |
 |---|---|---|
-| **v0.1.0（当前）** | MVP 验真假核心闭环 | 内容净化（去广告/轻量纠错）+ 质量评估（真/假/可疑 + 理由）；先跑通单条最小可用 |
-| v0.2.0 | 完整鉴定报告 + 批量 | 优点分析（6 子能力）+ 结构化 SOP + 溯源 + 批量/队列并行处理 |
-| v0.3.0 | 验真假深化（规模期） | 跨源矛盾检测 + 时效判定 + 冲突仲裁（基础验真假已稳，规模期一次做实） |
+| **v0.1.0（当前）** | MVP 验真假核心闭环 | 内容净化（按文本类型：字幕 ASR 清洗 / 结构化文案直提炼）+ 质量评估**真实性维度**（大模型 + 轻量统计数值自洽）；先跑通单条最小可用 |
+| v0.2.0 | 完整多维鉴定报告 + 批量 | 质量评估补全**文案/结构/逻辑**维度 + 优点分析（6 子能力）+ 结构化 SOP + 溯源 + 批量/队列并行处理 |
+| v0.3.0 | 验真假深化（规模期） | 跨源矛盾检测 + 跨源共识统计 + 时效判定 + 冲突仲裁（基础验真假已稳，规模期一次做实） |
 
 > 注：原「v0.3.0 业务线适配评估」已移出 Albedo——4 条业务线适配度评分归凝华（Rubedo）SOP 建立 / 总指挥部（OpusMagnum）编排；Albedo 只产出通用 SOP 与适用场景标签，不做生意适配评分。
 
@@ -62,9 +62,9 @@
 
 ### v0.1.0 验真假核心闭环 [MVP必须]
 
-- **T1** 数据契约 `core/models.py`：定义 `AlbedoInput`（对齐 Nigredo `process()` 输出：text / video_id / title / up_name / source_url）+ `RefinedKnowledgeObject`（全字段，v0.1.0 先填 clean_text / quality / status）📍C1/C7
-- **T2** 内容净化 `core/purify.py`：去广告话术（卖课特征模式库）、轻量 ASR 纠错、多语言翻译占位 📍C2
-- **T3** 质量评估 `core/assess.py`：LLM 单源评估 → `label(真/假/可疑)` + `reasoning`；借鉴 nuwa 三重验证思路 + anyone-skill 证据分级 📍C3
+- **T1** 数据契约 `core/models.py`：定义 `AlbedoInput`（对齐 Nigredo `process()` 输出：text / **text_type** / **signals** / video_id / title / up_name / source_url）+ `RefinedKnowledgeObject`（**quality 从一开始设计成多维对象** truthfulness/copywriting/structure/logic，v0.1.0 先填 truthfulness + status）📍C1/C7
+- **T2** 内容净化 `core/purify.py`：按 `text_type` 处理（字幕走 ASR 清洗去语气词/纠错，结构化文案直提炼）+ 去广告话术（卖课特征模式库）+ 多语言翻译占位 📍C2
+- **T3** 质量评估 `core/assess.py`：LLM 单源评估**真实性维度** → `truthfulness.label(真/假/可疑)` + `reasoning`；借鉴 nuwa 三重验证 + anyone-skill 证据分级；**统计学手段**（数值自洽）作为补充验证 📍C3
 - **T7** 流水线编排（最小）`flows/refine.py`：串联 C2→C3，组装最小 `RefinedKnowledgeObject`，由 quality.label 推 status 📍C1→C7
 - **T8** LLM 调用封装 `core/llm.py`：对齐熔知 `_call_llm_api`（DeepSeek，env 配置 base_url/api_key/model），供 C3 复用 📍C3
 - **T9** 最小 UI `app.py` + `run.bat`：粘贴文本（或选 Nigredo 输出 JSON）→ 一键炼真 → 展示「真假鉴定」📍C7
@@ -89,6 +89,8 @@
 # core/models.py（MVP 字段，规模期扩展不破坏兼容）
 AlbedoInput:
   text: str            # 净化前生料（Nigredo subtitle.full_text）
+  text_type: str       # 文本类型: "subtitle"|"social_post"|"article"|"doc_ppt"|"doc_excel" —— 决定净化/评估策略
+  signals: dict = {}   # 平台归一化信号包(engagement/audience/sentiment)，Nigredo 归一化传入
   video_id: str = ""   # Nigredo info.bvid
   title: str = ""      # Nigredo info.title
   up_name: str = ""    # Nigredo info.owner.name
@@ -97,10 +99,14 @@ AlbedoInput:
 RefinedKnowledgeObject:
   input_ref: AlbedoInput
   clean_text: str                          # C2 净化后
-  quality: { label: "true"|"false"|"suspect",
-             score: 0-100,
-             reasoning: str,
-             evidence_grade: "L1"|"L2"|"L3"|"L4" }   # C3
+  quality:
+    truthfulness: { label: "true"|"false"|"suspect",
+                    score: 0-100,
+                    reasoning: str,
+                    evidence_grade: "L1"|"L2"|"L3"|"L4" }   # 维度① 真实性(驱动 status)
+    copywriting:  { score: 0-100, reasoning: str }         # 维度② 文案质量
+    structure:    { score: 0-100, reasoning: str }         # 维度③ 结构
+    logic:        { score: 0-100, reasoning: str }         # 维度④ 逻辑
   merits: { core_insight: str,
             reusable_steps: [str],
             differentiation: str,
@@ -114,12 +120,12 @@ RefinedKnowledgeObject:
          completion_checklist: [str] }     # C5
   provenance: { video_id, up_name, source_url, title, processed_at }  # C6
   trust_score: float        # 0-1，FPF 轻量版
-  status: "accepted"|"suspect"|"rejected"  # 由 quality.label 推
+  status: "accepted"|"suspect"|"rejected"  # 由 quality.truthfulness.label 推
 ```
 
 **下游映射（交熔知时）**：`quality.label` → `epistemic_status`（true→corroborated / suspect→unverified / false→rejected）；`trust_score` → 熔知 payload `trust_score`；`clean_text` 交熔知做分面分类 + 切块 + 向量化 + 入库。
 
-> 版本填充节奏：v0.1.0 仅填 `clean_text` / `quality` / `status`；v0.2.0 补全 `merits` / `sop` / `provenance` / `trust_score`。`business_line_tags` 已移除（业务线适配评分移出 Albedo）。
+> 版本填充节奏：v0.1.0 仅填 `clean_text` / `quality.truthfulness` / `status`（**数据模型从一开始就设计成多维**，避免 v0.2.0 推倒重来）；v0.2.0 补全 `quality.copywriting / structure / logic` + `merits` / `sop` / `provenance` / `trust_score`。`business_line_tags` 已移除（业务线适配评分移出 Albedo）。
 
 ---
 
@@ -136,7 +142,7 @@ RefinedKnowledgeObject:
 
 ## 七、验收标准（MVP）
 
-1. 贴一条各平台经验文字（当前以 B站 为主，或选 Nigredo 输出 JSON）→ 一键炼真 → 出一份说人话的「鉴定报告」（可信度 + 优点 + 可照搬步骤 + 溯源）
+1. 丢一条各平台经验文字（字幕或结构化文案均可，当前以 B站 为主，或选 Nigredo 输出 JSON）→ 一键炼真 → 出一份**多维鉴定报告**（真实性评分 + 文案/结构/逻辑维度 + 核心优点 + 可照搬步骤 + 溯源）
 2. 卖课谎言类内容能被标「可疑 / 虚假」并附理由
 3. 产出 SOP 能被 Rubedo 直接读取消费（格式对齐）
 4. 报告落 `data/out/*.json`，字段符合第五节契约
