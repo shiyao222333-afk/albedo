@@ -2,9 +2,15 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
 
-## [0.1.0] - Unreleased（代码完成，待 L4 用户验收）
+## [Unreleased]（v0.2.0 切片 A 进行中）
+
+### Added
+- **A3 来源溯源** `core/provenance.py`：`build_provenance(inp) -> dict` 纯函数（不调 LLM），从 `AlbedoInput` 抽取 `video_id / up_name / source_url / title` + `processed_at`（**ISO 8601 UTC**，如 `2026-07-09T16:05:00Z`）；缺字段留空、绝不抛异常中断流水线；兼容 dict 输入（JSON 反序列化场景）。溯源种类扩展列入研究课题（§6.1，v0.4.0 起归本模块）。已通过 L1 语法 + L2 单测（18/18）。
+
+## [0.1.0] - 2026-07-09（代码完成 + L4 用户验收通过）
 
 > v0.1.0 目标：单条内容「能不能信」核心闭环——净化 + 真实性评估 + 变现标注 → 入库就绪报告。
+> L4 验收：2026-07-09 真实端到端跑通（GPU large-v3 转写 BV1BXQABNE4y → 真实 DeepSeek 炼真出结果）。详见下方「验收记录」。
 
 ### Added
 - **T1 数据契约** `core/models.py`：`AlbedoInput`（对齐 Nigredo `process()` 输出）+ `RefinedKnowledgeObject`（quality 从一开始就设计为多维对象 truthfulness/copywriting/structure/logic，v0.1.0 先填 truthfulness + status）。枚举：TextType / TruthfulnessLabel / EvidenceGrade / Status / MonetizationCategory。
@@ -23,6 +29,13 @@
 - 变现标注与真实性结论解耦：卖课话术是真实性评估的**证据之一**，绝不仅凭「在卖课」判 false。
 - 数据模型从 v0.1.0 起即设计为多维 + 入库就绪（`ingestion_meta` 预留），避免 v0.2.0 推倒重来。
 
-### Pending
-- **L4 用户验收**：需在用户本机（有 `requests` + `KB_LLM_API_KEY`）用真实教程 + 卖课谎言两条样例跑通，验证验收标准 §5.3 ①–④。沙箱已通过桩替换完成编排层 / status 映射 / 变现集成单测，真实 LLM 路径待本机验证。
-- **GitHub 推送**：等用户在 github.com 建空仓库 `shiyao222333-afk/albedo`（private，不初始化）后，再 `git remote add` + `push`。
+### 验收记录（L4，2026-07-09）
+- 真实端到端跑通：样例 `BV1BXQABNE4y`《我蒸馏了17个大佬给我打工（开源免费）》/ 花叔v
+  - 馏析落盘：GPU faster-whisper **large-v3 + CUDA** 转写，440 段 / 5985 字 / 中文(概率 1.00)，落盘 `BV1BXQABNE4y.txt`（纯文本）+ `.srt`（带时间轴）
+  - 炼真分析：真实 DeepSeek 跑 `refine()`，输出 `data/out/BV1BXQABNE4y_refined.json`
+  - 鉴定结果：`label=suspect / score=45 / evidence_grade=L1 / status=suspect / monetization.related=false`
+  - 结论解读：评估器仅看字幕文本、无法联网核实视频主张（如「4天6000+ star」），故严谨标「存疑」。这**正是 MVP 占位预期**——置信度/评估方式本就规划为 v0.3+ 大改。链路全通，验收通过。
+- 配套改动（已 commit + 推送 Nigredo `cd1349e`）：馏析 `core/downloader.py` 新增字幕落盘（`.txt`+`.srt`），闭合「馏析→炼真」文件传递。
+
+### 暂缓（非阻塞）
+- **GitHub 推送**：用户要求先本地、暂不上传。待建空仓库 `shiyao222333-afk/albedo`（private，不初始化）后再 `git remote add` + `push`。当前代码已本地 commit（`10ba175`）。

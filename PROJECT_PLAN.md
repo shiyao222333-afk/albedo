@@ -1,9 +1,9 @@
 # 炼真（Albedo）项目计划
 
-> 当前版本：**v0.1.0（MVP：验真假核心闭环）**
+> 当前版本：**v0.2.0（完整多维鉴定报告 + 批量）** ｜ v0.1.0 已验收（2026-07-09）
 > 蓝图（定位/边界）：见 `BLUEPRINT.md` ｜ 调研报告：见 `docs/ALBEDO-RESEARCH-2026-07-09.md`
 > 决策记录：见 `docs/ADR-002 ~ ADR-005`
-> 最后更新：2026-07-09
+> 最后更新：2026-07-10
 
 ---
 
@@ -40,7 +40,7 @@ Nigredo(馏析·采集) → Albedo(炼真·认知精炼) → Citrinitas(熔知·
 - 不做业务线适配评分（归 Rubedo / OpusMagnum；炼真只产通用 SOP + 适用场景标签）
 - 不重写意图、不封装产品
 
-**当前重心**：v0.1.0 验真假核心闭环（先把「单条内容能不能信」跑通）。
+**当前重心**：v0.2.0 完整多维鉴定报告（在已验收的 v0.1.0 基础上，补全 文案/结构/逻辑 维度 + 优点分析 + 结构化 SOP + 溯源 + 引用 + 报告渲染 + 批量）。
 
 ---
 
@@ -53,7 +53,7 @@ Nigredo(馏析·采集) → Albedo(炼真·认知精炼) → Citrinitas(熔知·
 | 我们的能力（MVP） | 借鉴自竞品 / 研究 | 我们的独特处理 |
 |---|---|---|
 | **质量评估（多维）**（真实性 + 文案 + 结构 + 逻辑 分维度） | **nuwa-skill** 三重验证 + **anyone-skill** L1-L4 证据分级 + **OpenFactCheck** 统一核查管线 + **统计学手段**（跨源共识频率 / 数值自洽 / 离群检测） | 单源 LLM 实现真实性维度；**统计学**为补充验证（MVP 轻量数值自洽，规模期跨源共识）；输出直接映射熔知 `epistemic_status` |
-| **优点分析**（6 子能力） | **skill-from-masters**（方法萃取，非人物萃取）+ **nuwa**（诚实边界=陷阱预警）+ **pangu**（质量验证审计） | **多 SOP 并列产出**（对齐 Rubedo 可消费格式） |
+| **优点分析**（8 子能力：内容轴 6 + 形式轴 2） | **skill-from-masters**（方法萃取，非人物萃取）+ **nuwa**（诚实边界=陷阱预警）+ **pangu**（质量验证审计）+ 形式轴（表达质量 / 格式可复用，借鉴 Acrolinx / Writer 写作质量多维思路） | **多 SOP 并列产出**（对齐 Rubedo 可消费格式） |
 | **结构化提炼**（标准 SOP） | **TubeScribed**（商业化 SOP 格式：目的+前置+编号步骤+警告+完成清单） | 产出对齐 **Rubedo 可消费格式**，直接进凝华 SOP 建立 |
 | **溯源** | 所有竞品均有来源记录 | 与 Nigredo `video_id` / 时间戳**强绑定**（精炼阶段即知来源） |
 | **内容净化**（去广告） | **pangu** 质量验证中的净化环节 | 内置「卖课话术特征模式库」（过度承诺/模糊施压/付费诱导） |
@@ -91,8 +91,8 @@ Nigredo(馏析·采集) → Albedo(炼真·认知精炼) → Citrinitas(熔知·
 
 | 阶段 | 版本 | 目标 | 关键能力 | 对应研究课题 |
 |---|---|---|---|---|
-| **① 核心闭环**（现在做） | **v0.1.0（当前）** | 验真假核心闭环 | 内容净化（按文本类型）+ 质量评估**真实性维度**（大模型 + 轻量统计数值自洽）；单条最小可用先跑通 | 变现≠差内容护栏（报告注记起步） |
-| | **v0.2.0** | 完整多维鉴定报告 + 批量 | 质量评估补全**文案/结构/逻辑**维度 + 优点分析（6 子能力）+ 结构化 SOP + 溯源 + 引用标记 + 变现标注 + 报告渲染 + 批量/队列 + **入库就绪(ingestion_meta)** | — |
+| **① 核心闭环**（现在做） | **v0.1.0（已验收）** | 验真假核心闭环 | 内容净化（按文本类型）+ 质量评估**真实性维度**（大模型 + 轻量统计数值自洽）；单条最小可用先跑通 | 变现≠差内容护栏（报告注记起步） |
+| | **v0.2.0** | 完整多维鉴定报告（切片 A 主线）+ 批量/引用/入库（切片 B/C 后置） | 内容摘要基础层(A0) + 质量评估补全**文案/结构/逻辑**维度 + 优点分析（8 子能力：内容轴6+形式轴2）+ 结构化 SOP/大纲 + 溯源 + 报告渲染（A4 以摘要开头）；引用标记(T13)/入库元数据(T14)/批量(T11) 后置 | — |
 | **② 跨源规模**（积累多条来源后） | **v0.3.0** | 验真假深化 | 跨源矛盾检测 + 跨源共识统计 + 时效判定 + 冲突仲裁 + 领域上下文（防域内外误伤）+ 全新说法标「未印证」 | 域内外误伤 / 全新说法无处印证 / 过时SOP / 多冲突SOP |
 | **③ 可靠性与可信** | **v0.4.0** | 进料与可解释增强 | 去重/近重复 + 超长切块 + **可解释到根因** + **评测集** + 评分主观偏见注记 + 采不到内容标注（消费 Nigredo 标记） | 去重 / 超长切块 / 可解释到根因 / 评测集 / 评分主观偏见 / 采不到内容标注 |
 | **④ 智能维度与经营闭环** | **v0.5.0** | 智能维度 + 经营闭环 | **新颖度维度** + **上手门槛维度** + 变现≠差内容护栏（深化）+ 人肉覆盖（一键「我信这个」）+ 批量总览看板 + 成本账 + 反馈回路（记住你的纠正） | 新颖度 / 上手门槛 / 变现护栏深化 / 人肉覆盖 / 总览看板 / 成本账 / 反馈回路 |
@@ -119,23 +119,54 @@ Nigredo(馏析·采集) → Albedo(炼真·认知精炼) → Citrinitas(熔知·
 
 ### v0.1.0 验真假核心闭环 [MVP必须]
 
-- **T1** 数据契约 `core/models.py`：定义 `AlbedoInput`（对齐 Nigredo `process()` 输出：text / **text_type** / **signals** / video_id / title / up_name / source_url）+ `RefinedKnowledgeObject`（**quality 从一开始设计成多维对象** truthfulness/copywriting/structure/logic，v0.1.0 先填 truthfulness + status）📍C1/C7 ✅ 已实现（待 L4 验收）
-- **T2** 内容净化 `core/purify.py`：按 `text_type` 处理（字幕走 ASR 清洗去语气词/纠错，结构化文案直提炼）+ 去广告话术（卖课特征模式库）+ 多语言翻译占位 📍C2 ✅ 已实现（待 L4 验收）
-- **T3** 质量评估 `core/assess.py`：LLM 单源评估**真实性维度** → `truthfulness.label(真/假/可疑)` + `reasoning`；借鉴 nuwa 三重验证 + anyone-skill 证据分级；**统计学手段**（数值自洽）作为补充验证；同步检测 `monetization.related`（复用卖课话术特征） 📍C3 ✅ 已实现（待 L4 验收）
-- **T7** 流水线编排（最小）`flows/refine.py`：串联 C2→C3，组装最小 `RefinedKnowledgeObject`，由 quality.label 推 status 📍C1→C7 ✅ 已实现（待 L4 验收）
-- **T8** LLM 调用封装 `core/llm.py`：对齐熔知 `_call_llm_api`（DeepSeek，env 配置 base_url/api_key/model），供 C3 复用 📍C3 ✅ 已实现（待 L4 验收）
-- **T9** 最小 UI `app.py` + `run.bat`：粘贴文本（或选 Nigredo 输出 JSON）→ 一键炼真 → 展示「真假鉴定」📍C7 ✅ 已实现（待 L4 验收）
+- **T1** 数据契约 `core/models.py`：定义 `AlbedoInput`（对齐 Nigredo `process()` 输出：text / **text_type** / **signals** / video_id / title / up_name / source_url）+ `RefinedKnowledgeObject`（**quality 从一开始设计成多维对象** truthfulness/copywriting/structure/logic，v0.1.0 先填 truthfulness + status）📍C1/C7 ✅ 已实现（L4 验收通过 2026-07-09）
+- **T2** 内容净化 `core/purify.py`：按 `text_type` 处理（字幕走 ASR 清洗去语气词/纠错，结构化文案直提炼）+ 去广告话术（卖课特征模式库）+ 多语言翻译占位 📍C2 ✅ 已实现（L4 验收通过 2026-07-09）
+- **T3** 质量评估 `core/assess.py`：LLM 单源评估**真实性维度** → `truthfulness.label(真/假/可疑)` + `reasoning`；借鉴 nuwa 三重验证 + anyone-skill 证据分级；**统计学手段**（数值自洽）作为补充验证；同步检测 `monetization.related`（复用卖课话术特征） 📍C3 ✅ 已实现（L4 验收通过 2026-07-09）
+- **T7** 流水线编排（最小）`flows/refine.py`：串联 C2→C3，组装最小 `RefinedKnowledgeObject`，由 quality.label 推 status 📍C1→C7 ✅ 已实现（L4 验收通过 2026-07-09）
+- **T8** LLM 调用封装 `core/llm.py`：对齐熔知 `_call_llm_api`（DeepSeek，env 配置 base_url/api_key/model），供 C3 复用 📍C3 ✅ 已实现（L4 验收通过 2026-07-09）
+- **T9** 最小 UI `app.py` + `run.bat`：粘贴文本（或选 Nigredo 输出 JSON）→ 一键炼真 → 展示「真假鉴定」📍C7 ✅ 已实现（L4 验收通过 2026-07-09）
 
-### v0.2.0 完整鉴定报告 + 批量 [MVP延伸]
+### v0.2.0 完整多维鉴定报告（切片规划）
 
-- **T4** 优点分析 `core/merit.py`：LLM 结构化输出 6 子能力（核心洞察 / 可复用步骤 / 差异化亮点 / 适用场景 / 陷阱预警 / 迁移成本）；借鉴 skill-from-masters + nuwa 诚实边界 📍C4
-- **T5** 结构化提炼 `core/structure.py`：产出标准 SOP（目的 + 前置条件 + 编号步骤 + 警告 + 完成清单），对齐 TubeScribed 格式 📍C5
-- **T6** 溯源 `core/provenance.py`：从 Nigredo `info` 取 video_id / up_name / source_url / title + 记录 processed_at 📍C6
-- **T7+** 流水线补全 `flows/refine.py`：扩展编排串入 C4→C6，补全 `RefinedKnowledgeObject` 全字段（merits / sop / provenance）+ FPF 轻量 trust_score 📍C1→C7
-- **T11** 批量 / 队列（方案A）：参考 Nigredo 队列机制，支持多条生料并行炼真 📍C1
-- **T12** 鉴定报告产出 `core/report.py`：炼真的**主交付物**——从内部 `RefinedKnowledgeObject` 渲染人能直接看的 Markdown 鉴定报告（v0.1.0 最小版由 T9 UI 直出，v0.2.0 完整版含全维度 + 引用 + 变现标注）；结构化 JSON 仅留作内部/未来入库用 📍C7
-- **T13** 引用标记 `core/references.py`：抽取书/网址/资料并结构化 `references` 📍C5
-- **T14** 入库元数据预填 `core/ingest_meta.py`：由精炼结果推导并写入 `ingestion_meta`（content_type / domain UDC / temporal_nature / epistemic_status / trust_score / knowledge_type / target_platform / language / is_personal / access_level 等），对齐熔知分面分类法重构（UDC 9 主类 / temporal_nature / epistemic_status），使熔知入库直读直存 📍C7
+v0.2.0 拆成三个切片，分批落地，避免五器未整合时过度设计：
+
+- **切片 A（本次先做）：完整鉴定报告主线** —— 补全「讲什么（A0）→ 优点（A1）→ 结构（A2）→ 溯源（A3）→ 报告（A4）→ 编排（A5）→ 界面（A6）」全链路
+- **切片 B（后置）**：引用标记（T13）+ 入库元数据预填（T14）
+- **切片 C（后置）**：批量 / 队列（T11）
+
+> **铁规矩**：评估层 `core/assess.py`（真实性 / 数值 / 变现）v0.2.0 **一行不动**，仍是 MVP 占位，等 v0.3+ 大改。
+> **实现顺序**：A3（纯函数零风险）→ A0（基础层）→ A1（五透镜）→ A2（类型 + 两提取器 + 契约）→ A4（报告器）→ A5（编排接入）→ A6（界面），每步可独立编译、桩替换测试。
+> **架构护栏**：A0 摘要中性（不评级不判真假）；A1.4/A1.5 形式轴与 `assess` 真实性严格分离，表达精彩绝不加分给 `trust_score`（卖课骗局常讲得精彩但假）。
+
+#### 切片 A：完整鉴定报告主线（15 任务，均 pending）
+
+- **A0** #711 内容摘要基础层 `core/summary.py`：`summarize_content(clean_text, context) -> dict`，产 `summary{gist, bullets, key_claims}`——中性"这篇讲什么"，与 merits(评价)/assess(真假)严格分离；排净化后、评估前，作下游压缩上下文基底 📍C2后·底层
+  - **A0 决策（2026-07-10 锁定）**：① gist=1~2 句 / bullets=3~7 条 / key_claims=2~5 条 ② 语言跟原文（中进中出/英进英出）③ 降级：LLM 失败→取 clean_text 前 200 字当 gist、其余留空；原文<50 字跳过 LLM 直接 gist=原文 ④ **保质量优先（方案 X）**：A1/A2 仍读完整原文，summary 作报告开头+未来批量压缩种子 ⑤ key_claims=中性提取"可被验证的主张"，真假留给 assess
+- **A1** #696 优点分析编排 `core/merit.py`：串 5 透镜，填 `merits`（**8 子能力**：内容轴 6 + 形式轴 2）📍C4
+  - **A1 决策（2026-07-10 锁定）**：① **2 次 LLM 调用**（内容轴 6 子能力 1 次 + 形式轴 2 子能力 1 次；形式轴挂了不影响内容轴）② presentation_craft={清晰度/结构套路/可学技巧/节奏} format_reusable={模板骨架/可复用段落/改编提示} ③ 降级：哪次挂对应轴留空+报告标注 ④ 语言跟原文 ⑤ 提示词"只提取不编造" ⑥ A1.1 可照搬步骤(high-level) 与 A2 SOP(正式编号) 层次不同不撞车
+  - A1.1 #702 方法价值萃取（核心洞察 + 可复用步骤）← skill-from-masters
+  - A1.2 #703 批判校验萃取（差异化亮点 + 陷阱预警）← nuwa 诚实边界 + pangu 批评者视角
+  - A1.3 #704 适配落地萃取（适用场景 + 迁移成本）← 适用性评估
+  - A1.4 #709 表达形式质量萃取（清晰度 / 结构模式 / 具体技巧 / 节奏）← **形式轴**，输出可学技巧而非泛夸
+  - A1.5 #710 格式可复用萃取（可套用模板 / 结构骨架 / 改编提示）← **形式轴**，对一人公司内容业务（小红书 / B站 抄结构）直接可用
+- **A2** #697 结构化提炼编排 `core/structure.py`：结构类型识别 + 可扩展框架 📍C5
+  - A2.1 #705 结构类型识别 `detect_structure_type`：sop / argument / case_study / comparison / narrative / qa / mixed / unknown
+  - A2.2 #706 SOP 型 → TubeScribed 标准提取器，填 `sop{purpose, preconditions, steps, warnings, completion_checklist}`
+  - A2.3 #707 非 SOP 型 → 注册表模式 `STRUCTURE_EXTRACTORS`，按家族产 `outline` 填新增 `outline` 字段；unknown 回退通用提取器；未来新类型插拔即扩
+  - **A2 决策（2026-07-10 锁定）**：① 2 次 LLM 调用（detect_structure_type + 路由提取器）② 提取器登记 `STRUCTURE_EXTRACTORS` 注册表，未来新题材插拔即扩（**承载"多题材兼容"要求**）③ sop/outline 互斥填充 ④ outline 通用结构 {概述, 章节:[{小标题,要点}]} 各 family 有意义填 ⑤ 降级：识别失败→unknown→通用提取器；提取失败留空+报告标注 ⑥ text_type(输入格式) 与 structure_type(内容结构) 正交
+- **A3** #698 溯源 `core/provenance.py`：`build_provenance(inp) -> dict` 纯函数不调 LLM，取 video_id / up_name / source_url / title + processed_at（**ISO 8601 UTC**，如 `2026-07-09T16:05:00Z`）；**缺字段留空、绝不报错中断**（溯源种类扩展见 6.1 研究课题），填 `provenance` 📍C6 ✅ 已实现（2026-07-10，L1+L2 通过）
+- **A4** #699 鉴定报告渲染 `core/report.py`：`render_report(out, inp) -> str`，从内部对象渲染人读 Markdown（主交付物，ADR-004 单报告）；**以 A0.summary 开头** + 优点 + SOP/大纲 + 溯源 + 数值预检 📍C7
+  - **A4 决策**：① 单 Markdown 报告（ADR-004），章节序：结论卡→A0摘要→优点8子能力→结构化(SOP/大纲)→溯源→数值预检 ② 某维度降级留空→显"（该维度未能生成）"不崩 ③ 语言跟原文
+- **A5** #701 编排补全 `flows/refine.py`：`refine()` 串 A0 → C3 assess(零改) → A1 → A2 → A3 → A4，组装后 `out.report = render_report(...)`；任一步 LLM 失败降级空 dict 不阻断 📍C1→C7
+  - **A5 决策**：① 全程 try/except 包裹每步 LLM，失败→空 dict 续跑，绝不整条中断 ② 顺序 A0→assess→A1→A2→A3→A4 ③ 组装 RefinedKnowledgeObject 后写 out.report
+- **A6** #700 界面扩展 `app.py`：移除旧内联报告拼接，直接展示 `out.report` + 顶部结论卡；导出 .md(out.report) + .json(out 字典) 📍C7
+  - **A6 决策**：① 移除 v0.1.0 T9 内联拼接，改渲染 out.report(Markdown) ② 保留粘贴文本/选 Nigredo JSON 输入 ③ 导出 .md + .json 两按钮 ④ Streamlit
+
+#### 切片 B / C（后置，不进本次 v0.2.0 主线）
+
+- **T13** 引用标记 `core/references.py`：抽取书/网址/资料并结构化 `references` 📍C5（切片 B）
+- **T14** 入库元数据预填 `core/ingest_meta.py`：由精炼结果推导并写入 `ingestion_meta`（对齐熔知分面重构 UDC 9 主类 / temporal_nature / epistemic_status），入库直读直存 📍C7（切片 B）
+- **T11** 批量 / 队列（方案A）：参考 Nigredo 队列机制，多条生料并行炼真 📍C1（切片 C）
 
 ### 已移出 Albedo（归其它项目，不列为任务）
 
@@ -169,6 +200,9 @@ AlbedoInput:
 RefinedKnowledgeObject:
   input_ref: AlbedoInput
   clean_text: str                          # C2 净化后
+  summary: { gist: str,                    # A0 内容摘要（中性"讲什么"，与评价/真假严格分离）
+             bullets: [str],
+             key_claims: [str] }           # C2后·底层
   quality:
     truthfulness: { label: "true"|"false"|"suspect",
                     score: 0-100,
@@ -177,18 +211,22 @@ RefinedKnowledgeObject:
     copywriting:  { score: 0-100, reasoning: str }         # 维度② 文案质量
     structure:    { score: 0-100, reasoning: str }         # 维度③ 结构
     logic:        { score: 0-100, reasoning: str }         # 维度④ 逻辑
-  merits: { core_insight: str,
-            reusable_steps: [str],
-            differentiation: str,
-            applicable_scenarios: [str],
-            pitfalls: [str],
-            migration_cost: str }          # C4
+  merits: { core_insight: str,            # A1.1 方法价值
+            reusable_steps: [str],         # A1.1 方法价值
+            differentiation: str,          # A1.2 批判校验
+            pitfalls: [str],               # A1.2 批判校验
+            applicable_scenarios: [str],   # A1.3 适配落地
+            migration_cost: str,           # A1.3 适配落地
+            presentation_craft: dict,      # A1.4 形式轴：表达形式质量（清晰度/结构/技巧/节奏），可学技巧，绝不参与 trust_score
+            format_reusable: dict }        # A1.5 形式轴：格式可复用（模板/骨架/改编提示），对一人公司内容业务直接可用  # C4
   sop: { purpose: str,
          preconditions: [str],
          steps: [{idx: int, text: str}],
          warnings: [str],
-         completion_checklist: [str] }     # C5
-  provenance: { video_id, up_name, source_url, title, processed_at }  # C6
+         completion_checklist: [str] }     # C5（仅 structure_type=sop 时填）
+  structure_type: str    # A2.1 识别的内容结构家族: sop/argument/case_study/comparison/narrative/qa/mixed/unknown
+  outline: dict          # A2.3 非 sop 型产出的内容大纲（按 family 不同结构）；unknown 回退通用大纲
+  provenance: { video_id, up_name, source_url, title, processed_at }  # C6（processed_at = ISO 8601 UTC，缺字段留空）
   trust_score: float        # 0-1，FPF 轻量版
   status: "accepted"|"suspect"|"rejected"  # 由 quality.truthfulness.label 推
   monetization: { related: bool,
@@ -262,6 +300,8 @@ RefinedKnowledgeObject:
 | 超长内容切块 | **v0.4.0** | 2 小时课 vs 30 秒技巧长度差百倍，太长先切块再评，否则 LLM 丢上下文 |
 | 采不到的内容标注 | **v0.4.0** | 微信付费文、B站会员专享适配器抓不到，标「采不到」而非假装没有（Nigredo 适配器职责，炼真消费标记） |
 | 图里的信息丢了 | **v0.6.0** | PPT 对比图、视频演示画面只吃文字，图内数据/证据完全没进炼真（需上游 OCR/多模态） |
+| ★ 溯源种类扩展研究 | **v0.4.0 起** | 当前 provenance 仅 `video_id/up_name/source_url/title + UTC 时间戳`（MVP 缺字段留空）；未来随输入源扩展（网页/微信/文档/PPT）**深入研究增加溯源维度**：来源平台归一化信号、适配器版本、采集时间、原始平台字段映射、引用锚点等——归 A3 #698 演进线 |
+| ★ 多题材/多文件格式兼容 | **v0.4.0 起** | 当前 MVP 仅覆盖视频字幕/结构化文案；未来须兼容**别的题材与文件**（文档 PPT/Excel/Word、网页、微信/小红书多形态、跨行业题材）；管线已留扩展点（`text_type` 标记 + A2.3 结构类型注册表插拔即扩），列入规划确保不写死、新格式插拔即扩——归 A2 #697 演进线 |
 
 ### 6.2 验真假本身的盲区
 | 课题 | 目标版本 | 说明 |
