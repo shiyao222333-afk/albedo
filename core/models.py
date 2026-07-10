@@ -119,6 +119,7 @@ class IngestionMeta:
 class RefinedKnowledgeObject:
     input_ref: AlbedoInput
     clean_text: str = ""
+    summary: dict = field(default_factory=dict)   # A0 内容摘要（中性"讲什么"）：{gist, bullets, key_claims}
     quality: Quality = field(default_factory=Quality)
     merits: dict = field(default_factory=dict)
     sop: dict = field(default_factory=dict)

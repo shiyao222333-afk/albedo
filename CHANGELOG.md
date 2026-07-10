@@ -6,6 +6,7 @@
 
 ### Added
 - **A3 来源溯源** `core/provenance.py`：`build_provenance(inp) -> dict` 纯函数（不调 LLM），从 `AlbedoInput` 抽取 `video_id / up_name / source_url / title` + `processed_at`（**ISO 8601 UTC**，如 `2026-07-09T16:05:00Z`）；缺字段留空、绝不抛异常中断流水线；兼容 dict 输入（JSON 反序列化场景）。溯源种类扩展列入研究课题（§6.1，v0.4.0 起归本模块）。已通过 L1 语法 + L2 单测（18/18）。
+- **A0 内容摘要基础层** `core/summary.py`：`summarize_content(clean_text, context="") -> dict`，产中性摘要 `summary{gist, bullets, key_claims}`——不评级、不判真假，与 merits/assess 严格分离，排净化后、评估前作压缩底座 + 报告开头。配套在 `core/models.py` 的 `RefinedKnowledgeObject` 补 `summary` 字段（§5.1 契约落地）。决策落地：gist 1~2 句 / bullets 3~7 / key_claims 2~5、语言跟原文、LLM 失败降级 gist=前 200 字、原文 <50 字跳过 LLM、超限截断。已通过 L1 语法 + L2 单测（6/6，覆盖空/短/正常/带context/LLM异常/超限）。
 
 ## [0.1.0] - 2026-07-09（代码完成 + L4 用户验收通过）
 
