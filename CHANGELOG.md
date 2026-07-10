@@ -7,6 +7,7 @@
 ### Added
 - **A3 来源溯源** `core/provenance.py`：`build_provenance(inp) -> dict` 纯函数（不调 LLM），从 `AlbedoInput` 抽取 `video_id / up_name / source_url / title` + `processed_at`（**ISO 8601 UTC**，如 `2026-07-09T16:05:00Z`）；缺字段留空、绝不抛异常中断流水线；兼容 dict 输入（JSON 反序列化场景）。溯源种类扩展列入研究课题（§6.1，v0.4.0 起归本模块）。已通过 L1 语法 + L2 单测（18/18）。
 - **A0 内容摘要基础层** `core/summary.py`：`summarize_content(clean_text, context="") -> dict`，产中性摘要 `summary{gist, bullets, key_claims}`——不评级、不判真假，与 merits/assess 严格分离，排净化后、评估前作压缩底座 + 报告开头。配套在 `core/models.py` 的 `RefinedKnowledgeObject` 补 `summary` 字段（§5.1 契约落地）。决策落地：gist 1~2 句 / bullets 3~7 / key_claims 2~5、语言跟原文、LLM 失败降级 gist=前 200 字、原文 <50 字跳过 LLM、超限截断。已通过 L1 语法 + L2 单测（6/6，覆盖空/短/正常/带context/LLM异常/超限）。
+- **A1 优点分析编排** `core/merit.py`：`analyze_merits(clean_text, context="") -> dict`，五透镜萃取填 `merits` 8 子能力（内容轴 6：core_insight/reusable_steps/differentiation/pitfalls/applicable_scenarios/migration_cost + 形式轴 2：presentation_craft/format_reusable）。**2 次独立 LLM 调用**（内容轴 1 次 + 形式轴 1 次），形式轴挂了不影响内容轴；架构护栏——形式轴提示词明确"表达精彩不代表内容可信、不参与真实性判断"，且本模块绝不触碰 trust_score/status。降级：单轴失败对应字段留空、另一轴照常；语言跟原文、只提取不编造、信息不足该项留空；reusable_steps 为 high-level 可照搬步骤（与 A2 正式编号 SOP 层次不同）。已通过 L1 语法 + L2 单测（7/7，覆盖空/双轴正常/单轴失败/双轴失败/类型兜底/context注入）。
 
 ## [0.1.0] - 2026-07-09（代码完成 + L4 用户验收通过）
 
