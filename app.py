@@ -1,8 +1,7 @@
-"""Albedo (Lian Zhen) · 最小 UI (v0.1.0)
+"""Albedo (Lian Zhen) · 最小 UI (v0.2.0)
 
 Streamlit 界面：手动提交文件 / 馏析项目输出（best-effort）→ 一键炼真 →
-展示净化文本 + 真实性（label/score/reasoning/evidence_grade）+ 入库状态 + 变现标注，
-并支持导出 .md 报告与 .json 精炼对象。
+直接渲染 A4 产出的完整鉴定报告（out.report），并支持导出 .md 报告与 .json 精炼对象。
 
 启动：双击 run.bat（自动装依赖并开 http://localhost:8501）
 依赖 LLM：需在 .env 配置 KB_LLM_API_KEY（对齐熔知约定）。
@@ -11,13 +10,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
 
 import streamlit as st
 
 from core.models import AlbedoInput
 from flows.refine import refine
-from core.assess import check_numeric_consistency
 
 st.set_page_config(page_title="炼真 Albedo · 认知精炼", page_icon="🔬", layout="wide")
 
@@ -28,12 +25,6 @@ _STATUS_CN = {
     "accepted": ("✅ 建议入库", "success"),
     "suspect": ("⚠️ 存疑待核", "warning"),
     "rejected": ("❌ 判定不实 / 不建议入库", "error"),
-}
-_GRADE_CN = {
-    "L1": "L1 仅作者声称（无外部证据）",
-    "L2": "L2 单源弱证据（截图 / 个例）",
-    "L3": "L3 多源一致 / 权威来源",
-    "L4": "L4 可验证事实 / 公认可复现",
 }
 _CAT_CN = {
     "selling_course": "卖课 / 知识付费",
@@ -84,47 +75,10 @@ def _best_effort_parse(raw: str):
     return s
 
 
-def _build_report_md(out, inp: AlbedoInput) -> str:
-    """把精炼结果渲染为可读 .md 报告。"""
-    t = out.quality.truthfulness
-    lines = [
-        "# 炼真报告 (Albedo)",
-        "",
-        f"- 来源：{inp.title or '未知'} / {inp.up_name or '未知'}",
-        f"- 入库状态：**{out.status}**",
-        f"- 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        "",
-        "## 净化后文本",
-        out.clean_text or "（空）",
-        "",
-        "## 真实性评估",
-        f"- 结论：**{t.label}**（置信 {t.score}/100）",
-        f"- 证据分级：{_GRADE_CN.get(t.evidence_grade, t.evidence_grade)}",
-        f"- 判断依据：{t.reasoning or '（无）'}",
-        "",
-        "## 变现标注",
-        f"- 是否涉及变现：{'是' if out.monetization.related else '否'}",
-        f"- 类别：{_CAT_CN.get(out.monetization.category, out.monetization.category)}",
-        f"- 说明：{out.monetization.note or '—'}",
-        "",
-        "## 数值自洽预检",
-    ]
-    nc = check_numeric_consistency(out.clean_text)
-    if nc.flags:
-        lines.append("- 红色信号：" + "；".join(nc.flags))
-    if nc.contradictions:
-        lines.append("- 数值矛盾：" + "；".join(nc.contradictions))
-    if nc.claims:
-        lines.append("- 抽取断言：" + "，".join(f"{d}={v}" for d, v in nc.claims))
-    if not (nc.flags or nc.contradictions or nc.claims):
-        lines.append("- 未发现明显数值过度承诺或内部矛盾。")
-    return "\n".join(lines)
-
-
 def main():
     st.title("🔬 炼真 (Albedo) · 认知精炼")
     st.caption(
-        "流水线中段：净化 + 多维真实性评估 + 变现标注 → 入库就绪报告。"
+        "流水线中段：净化 + 多维真实性评估 + 优点萃取 + 结构化 + 溯源 → 入库就绪鉴定报告。"
         "验证标准：卖课谎言标「虚假/存疑」、真实教程标「真实」。"
     )
 
@@ -189,7 +143,7 @@ def main():
                 st.info("馏析输出非 JSON，已按纯文本处理。")
 
     if st.button("🚀 一键炼真", type="primary", disabled=(inp is None or not inp.text.strip())):
-        with st.spinner("精炼中（调用 LLM 评估真实性）…"):
+        with st.spinner("精炼中（调用 LLM 多维评估）…"):
             try:
                 out = refine(inp)
             except RuntimeError as e:
@@ -199,47 +153,30 @@ def main():
                 st.error(f"未预期错误：{e}")
                 return
 
-        # ── 结果展示 ──
+        # ── 顶部结论卡（一眼概览）──
         st.divider()
         status_cn, status_kind = _STATUS_CN.get(out.status, ("未知", "warning"))
         getattr(st, status_kind)(f"入库状态：{status_cn}（{out.status}）")
-
+        t = out.quality.truthfulness
         col1, col2 = st.columns([1, 1])
         with col1:
-            st.subheader("🔎 真实性评估")
-            t = out.quality.truthfulness
-            st.markdown(f"**结论**：{_LABEL_CN.get(t.label, t.label)}（置信 {t.score}/100）")
-            st.markdown(f"**证据分级**：{_GRADE_CN.get(t.evidence_grade, t.evidence_grade)}")
-            st.markdown(f"**判断依据**：{t.reasoning or '（无）'}")
+            st.markdown(f"**真实性结论**：{_LABEL_CN.get(t.label, t.label)}（置信 {t.score}/100）")
         with col2:
-            st.subheader("💰 变现标注")
-            if out.monetization.related:
-                st.markdown(f"- 涉及变现：**是**")
-                st.markdown(f"- 类别：{_CAT_CN.get(out.monetization.category, out.monetization.category)}")
-                st.caption(out.monetization.note)
-            else:
-                st.markdown("- 涉及变现：**否**")
+            st.markdown(f"**信任分**：{out.trust_score:.2f}（0–1）")
+        if out.monetization.related:
+            st.caption(f"💰 涉及变现：{_CAT_CN.get(out.monetization.category, out.monetization.category)}"
+                       f" — {out.monetization.note or '—'}")
 
-        st.subheader("🧹 净化后文本")
-        st.text_area("", out.clean_text, height=180, disabled=True, label_visibility="collapsed")
-
-        # ── 数值自洽预检（透明展示）──
-        with st.expander("🔢 数值自洽预检（真实性补充证据）"):
-            nc = check_numeric_consistency(out.clean_text)
-            if nc.flags:
-                st.write("红色信号：", "；".join(nc.flags))
-            if nc.contradictions:
-                st.write("数值矛盾：", "；".join(nc.contradictions))
-            if nc.claims:
-                st.write("抽取断言：", "，".join(f"{d}={v}" for d, v in nc.claims))
-            if not (nc.flags or nc.contradictions or nc.claims):
-                st.write("未发现明显数值过度承诺或内部矛盾。")
+        # ── 完整鉴定报告（主交付物，ADR-004 单报告）──
+        st.divider()
+        st.subheader("📋 鉴定报告")
+        st.markdown(out.report)
 
         # ── 导出 ──
         st.divider()
         st.subheader("📤 导出")
         vid = inp.video_id or hashlib.md5(inp.text.encode("utf-8")).hexdigest()[:10]
-        md = _build_report_md(out, inp)
+        md = out.report
         js = out.to_json()
         c1, c2 = st.columns(2)
         c1.download_button("下载 .md 报告", md, file_name=f"albedo_{vid}.md", mime="text/markdown")
