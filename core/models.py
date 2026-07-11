@@ -123,6 +123,8 @@ class RefinedKnowledgeObject:
     quality: Quality = field(default_factory=Quality)
     merits: dict = field(default_factory=dict)
     sop: dict = field(default_factory=dict)
+    structure_type: str = ""    # A2.1 识别的内容结构家族: sop/argument/case_study/comparison/narrative/qa/mixed/unknown
+    outline: dict = field(default_factory=dict)   # A2.3 非 sop 型产出的内容大纲 {overview, sections:[{subtitle, points}]}；unknown 回退通用大纲
     provenance: dict = field(default_factory=dict)
     trust_score: float = 0.0
     status: str = ""
