@@ -2,7 +2,7 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
 
-## [Unreleased]（v0.2.0 切片 A 进行中）
+## [0.2.0] - 2026-07-12
 
 ### Added
 - **A3 来源溯源** `core/provenance.py`：`build_provenance(inp) -> dict` 纯函数（不调 LLM），从 `AlbedoInput` 抽取 `video_id / up_name / source_url / title` + `processed_at`（**ISO 8601 UTC**，如 `2026-07-09T16:05:00Z`）；缺字段留空、绝不抛异常中断流水线；兼容 dict 输入（JSON 反序列化场景）。溯源种类扩展列入研究课题（§6.1，v0.4.0 起归本模块）。已通过 L1 语法 + L2 单测（18/18）。
