@@ -1,6 +1,6 @@
 @echo off
 chcp 437 >nul
-title Albedo v0.2.0 - Knowledge Refiner
+title Albedo v0.2.0 - Knowledge Refiner (Watcher+UI)
 setlocal enabledelayedexpansion
 set "PROJECT_DIR=%~dp0"
 if "%PROJECT_DIR:~-1%"=="\" set "PROJECT_DIR=%PROJECT_DIR:~0,-1%"
@@ -37,13 +37,44 @@ if errorlevel 1 (
     %PY% -m pip install -r "%PROJECT_DIR%\requirements.txt"
 )
 
-REM --- Launch ---
-echo [START] Albedo on http://127.0.0.1:8501
+REM --- Cleanup stale instances (restart force-kill, mirror Citrinitas port_cleanup) ---
+echo [CLEAN] Cleaning stale Albedo instances...
+if exist "%PROJECT_DIR%\.watcher.pid" (
+    for /f %%p in (%PROJECT_DIR%\.watcher.pid) do (
+        taskkill /PID %%p /F >nul 2>&1
+    )
+    del /q "%PROJECT_DIR%\.watcher.pid" >nul 2>&1
+)
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr :8501 ^| findstr LISTENING') do (
+    taskkill /PID %%p /F >nul 2>&1
+)
+
+REM --- Launch watcher (independent background process) ---
+echo [START] Albedo transit watcher (independent process)...
+start "" /B %PY% -m watcher.run
+
+REM --- Launch UI ---
+echo [START] Albedo UI on http://127.0.0.1:8501
 start "" http://127.0.0.1:8501
 %PY% -m streamlit run app.py --server.port 8501
 set EXIT_CODE=%errorlevel%
-if %EXIT_CODE% NEQ 0 goto error_exit
-goto normal_exit
+
+goto cleanup
+
+:cleanup
+echo.
+echo [STOP] Shutting down Albedo transit watcher (UI closed -^> monitor closed)...
+if exist "%PROJECT_DIR%\.watcher.pid" (
+    for /f %%p in (%PROJECT_DIR%\.watcher.pid) do (
+        taskkill /PID %%p /F >nul 2>&1
+    )
+)
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr :8501 ^| findstr LISTENING') do (
+    taskkill /PID %%p /F >nul 2>&1
+)
+echo [STOP] All Albedo services stopped.
+if "%EXIT_CODE%"=="0" goto normal_exit
+goto error_exit
 
 :error_exit
 echo.
