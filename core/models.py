@@ -62,6 +62,15 @@ class AlbedoInput:
     title: str = ""
     up_name: str = ""
     source_url: str = ""
+    # —— 内容线结构化信号（2026-07-15 新增，全部可选，向后兼容旧调用）——
+    # 来源：Nigredo 中转 .md 经 parser 解析后填入；非字幕输入可留空走通用路径。
+    subtitle_lines: list = field(default_factory=list)   # [{ts:"mm:ss", start:float, text:str}] 解析 # 字幕 段
+    highlights: list = field(default_factory=list)       # [{ts:"mm:ss", start:float, content:str}] 解析 # 高光时间点
+    danmaku: list = field(default_factory=list)          # [{time:float, text:str}] 解析 # 弹幕
+    comments_pinned: list = field(default_factory=list)  # [{user, likes, text, pin_type}]
+    comments_top: list = field(default_factory=list)     # [{user, likes, text}]
+    ai_conclusion: str = ""                              # # AI 摘要 原文
+    play_analysis: dict = field(default_factory=dict)    # 三秒退出率/平均播放时长/完播率等
 
 
 # ── 质量四维（维度① 真实性 驱动 status）──
@@ -120,6 +129,12 @@ class RefinedKnowledgeObject:
     input_ref: AlbedoInput
     clean_text: str = ""
     summary: dict = field(default_factory=dict)   # A0 内容摘要（中性"讲什么"）：{gist, bullets, key_claims}
+    # —— 内容线（2026-07-15 新增，仅字幕输入填充）——
+    content_type: str = ""                          # classify 结果: tutorial/tool_review/knowledge/opinion/entertainment/narrative/unknown
+    key_sentences: list = field(default_factory=list)   # Route A 关键原话兜底 [{ts, text}]（原话不动）
+    content_extract: dict = field(default_factory=dict) # 按类型萃取: sop/decision/claim/concept（见 core/classify.py 路由）
+    highlight_blocks: list = field(default_factory=list) # 高光上下文块 [{ts, subtitle_window:[...], danmaku:[...], comments:[...]}]
+    grounding: dict = field(default_factory=dict)   # 保真自检: {checked, ungrounded:[{text, ts}]}（总结是否被字幕原文支撑）
     quality: Quality = field(default_factory=Quality)
     merits: dict = field(default_factory=dict)
     sop: dict = field(default_factory=dict)

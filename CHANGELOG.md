@@ -2,6 +2,22 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
 
+## [0.2.1] - 2026-07-15
+
+### Added
+- **内容线（字幕处理管线）增强**——针对 B站等字幕类输入，从「通用模板」升级为「先分类 → 按类型萃取 → 每条锚定字幕 → 自动查编造」的管线（调研见 `docs/RESEARCH-CONTENT-TRACK-2026-07-15.md` / `RESEARCH-CONTENT-SUMMARY-2026-07-15.md`）。同时治理「字幕输入分析太肤浅」与「同输入结果不稳定」两个任务（同源：固定码本 + temperature=0 + 单维度打分）。
+  - **上游契约增强**（跨项目，`Nigredo core/downloader.py` `_subtitle_lines_with_ts()`）：中转① `# 字幕` 段由整块 `full_text` 改为**逐条 `[mm:ss] 文本`**（CC/AI/Whisper 三路 `segments` 均带 start）。内容线得以「按字幕条数锚定」与「高光 ±15 条字幕窗口」；无 segments 降级整块，向后兼容。
+  - **数据契约扩展** `core/models.py`：`AlbedoInput` 增 `subtitle_lines / highlights / danmaku / comments_pinned / comments_top / ai_conclusion / play_analysis`（全可选、向后兼容）；`RefinedKnowledgeObject` 增 `content_type / key_sentences / content_extract / highlight_blocks / grounding`。
+  - **中转解析增强** `watcher/parser.py`：`parse_transit_md` 重写为分节解析，抽 `# 字幕/#高光时间点/#弹幕/#置顶评论/#高赞评论/#AI摘要` 为结构化字段；旧格式逐行降级不崩。
+  - **内容类型自动分类** `core/classify.py`：`classify_content_type()` 用 LLM（temperature=0 + 固定枚举）判 tutorial/tool_review/knowledge/opinion/entertainment/narrative/unknown，失败降级 unknown（确定性）。
+  - **Route A 关键句锚定** `core/content_track.py` `extract_key_sentences()`：先抄关键原话（带 ts 兜底不丢），再改写生成摘要（每条 bullet 标 source_ts 指回字幕）——措辞可变、内容一致。
+  - **高光上下文块** `core/content_track.py` `build_highlight_blocks()`：每条高光取前后 ±15 条字幕（时间轴锚定）+ 邻近弹幕，组成上下文块供萃取深挖（纯函数）。
+  - **按类型萃取** `core/content_track.py` `extract_by_type()`：tutorial→完整 SOP（目的/前置/步骤/坑/完成判定）/ tool_review→决策表 / opinion→论点图 / knowledge→概念卡 / entertainment→标记转形式线 / narrative→带ts大纲；每条带 ts。
+  - **摘要保真自检** `core/grounding.py` `check_grounding()`：类 SummaC NLI 蕴含判定，检查改写摘要是否被字幕原文支撑，无支撑句标「⚠️无原文支撑」（这是「总结是否编造」非「视频真假」，验真另议）。
+  - **编排接入** `flows/refine.py`：字幕输入且带结构化字幕行 → 走内容线（classify→关键句→高光块→萃取→保真），填充新字段；非字幕输入仍走旧 A0/A1/A2 通用路径；`assess.py` 真实性评估**零改（铁规矩）**。
+  - **报告按类型渲染** `core/report.py`：字幕输入按 `content_type` 渲染 SOP卡/决策表/论点图/概念卡 + 关键原话兜底段 + 高光块段 + 摘要保真标注；非字幕输入保持旧报告。
+  - 已通过 L1 语法（8 文件 py_compile）+ L2 parser 解析 + L3 内容线 `refine()` 端到端跑通（注入桩 LLM 验证 tutorial 分支 SOP 渲染 / 高光窗口 / 保真标注全部正确）。
+
 ## [0.2.0] - 2026-07-12
 
 ### Added

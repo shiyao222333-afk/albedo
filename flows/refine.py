@@ -40,6 +40,13 @@ from core.merit import analyze_merits
 from core.structure import analyze_structure
 from core.provenance import build_provenance
 from core.report import render_report
+from core.classify import classify_content_type
+from core.content_track import (
+    extract_key_sentences,
+    build_highlight_blocks,
+    extract_by_type,
+)
+from core.grounding import check_grounding
 
 
 # 维度① 真实性 label → 入库 status 映射
@@ -126,18 +133,49 @@ def refine(
     except Exception:
         monetization = Monetization(related=False)
 
-    # ── A0 摘要（内部已降级，不抛）──
-    ctx_str = _context_str(inp)
-    summary = summarize_content(clean_text, ctx_str)
+    # ── 内容线默认（字幕未结构化时走通用路径）──
+    content_type = ""
+    key_sentences = []
+    content_extract = {}
+    highlight_blocks = []
+    grounding = {}
+    use_content_track = (inp.text_type == "subtitle" and bool(inp.subtitle_lines))
+    if use_content_track:
+        # 字幕输入 → 内容线：分类 / 关键句+摘要 / 高光块 / 按类型萃取 / 保真自检
+        ct = _run_content_track(inp, llm_kwargs)
+        summary = ct["summary"]
+        merits = {}  # 内容线不单独产 merits，优点已融入各类型萃取
+        content_type = ct["content_type"]
+        key_sentences = ct["key_sentences"]
+        content_extract = ct["content_extract"]
+        highlight_blocks = ct["highlight_blocks"]
+        grounding = ct["grounding"]
+        # sop/outline 字段映射（旧报告路径兼容；内容线报告优先读 content_extract）
+        if content_type == "tutorial" and isinstance(content_extract, dict):
+            sop = {k: v for k, v in content_extract.items() if k != "kind"}
+            structure_type = "sop"
+            outline = {}
+        elif content_type == "narrative" and isinstance(content_extract, dict):
+            outline = {k: v for k, v in content_extract.items() if k != "kind"}
+            structure_type = "narrative"
+            sop = {}
+        else:
+            sop = {}
+            outline = {}
+            structure_type = content_type or ""
+    else:
+        # ── 旧通用路径 A0/A1/A2（非字幕输入）──
+        ctx_str = _context_str(inp)
+        summary = summarize_content(clean_text, ctx_str)
 
-    # ── A1 优点（内部已降级，不抛）──
-    merits = analyze_merits(clean_text, ctx_str)
+        # ── A1 优点（内部已降级，不抛）──
+        merits = analyze_merits(clean_text, ctx_str)
 
-    # ── A2 结构（内部已降级，不抛）──
-    structure = analyze_structure(clean_text, ctx_str)
-    structure_type = structure.get("structure_type", "") or ""
-    sop = structure.get("sop") or {}
-    outline = structure.get("outline") or {}
+        # ── A2 结构（内部已降级，不抛）──
+        structure = analyze_structure(clean_text, ctx_str)
+        structure_type = structure.get("structure_type", "") or ""
+        sop = structure.get("sop") or {}
+        outline = structure.get("outline") or {}
 
     # ── A3 溯源（纯函数，缺字段留空不抛）──
     provenance = build_provenance(inp)
@@ -159,6 +197,11 @@ def refine(
         provenance=provenance,
         status=status,
         monetization=monetization,
+        content_type=content_type,
+        key_sentences=key_sentences,
+        content_extract=content_extract,
+        highlight_blocks=highlight_blocks,
+        grounding=grounding,
     )
 
     # ── A4 报告渲染（纯逻辑，不抛；失败兜底占位）──
@@ -168,6 +211,40 @@ def refine(
         out.report = "（报告渲染未能生成）"
 
     return out
+
+
+def _run_content_track(inp: AlbedoInput, llm_kwargs: dict) -> dict:
+    """内容线主流程（字幕输入）：分类 → 关键句+摘要 → 高光块 → 按类型萃取 → 保真自检。
+
+    每步独立 try/except 降级（已在各子模块内），整体不抛。
+    """
+    content_type = classify_content_type(
+        inp.title, inp.subtitle_lines, inp.ai_conclusion, llm_kwargs
+    )
+    ks = extract_key_sentences(
+        inp.subtitle_lines, inp.title, inp.ai_conclusion, llm_kwargs
+    )
+    key_sentences = ks.get("key_sentences", [])
+    summary = ks.get("summary", {})
+    highlight_blocks = build_highlight_blocks(
+        inp.highlights, inp.subtitle_lines, inp.danmaku,
+        inp.comments_top, inp.comments_pinned, window=15,
+    )
+    content_extract = extract_by_type(
+        content_type, key_sentences, summary, highlight_blocks,
+        inp.title, inp.ai_conclusion, llm_kwargs,
+    )
+    grounding = check_grounding(
+        summary.get("bullets", []), inp.subtitle_lines, llm_kwargs
+    )
+    return {
+        "content_type": content_type,
+        "key_sentences": key_sentences,
+        "summary": summary,
+        "highlight_blocks": highlight_blocks,
+        "content_extract": content_extract,
+        "grounding": grounding,
+    }
 
 
 def refine_text(

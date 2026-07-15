@@ -12,8 +12,16 @@
 flowchart TD
     A["Nigredo 生料<br/>文字(字幕/社媒文案/文档/网页) + 文本类型 + 平台信号包 + info<br/>(video_id / title / up_name / source_url)"] --> B["入站 C1<br/>接收 + 校验"]
     B --> C["内容净化 C2<br/>去广告 / 轻量纠错 / 翻译占位"]
-    C --> A0["内容摘要 A0<br/>中性'讲什么'：gist / bullets / key_claims"]
+    C --> SUB{"字幕输入?<br/>带结构化字幕行"}
+    SUB -->|"否（通用文案）"| A0["内容摘要 A0<br/>中性'讲什么'：gist / bullets / key_claims"]
+    SUB -->|"是（字幕类）"| CT0["解析增强 C2b<br/>拆字幕/高光/弹幕/评论(带ts)"]
+    CT0 --> CT1["内容分类 CT1<br/>tutorial/tool_review/opinion/..."]
+    CT1 --> CT2["关键句锚定 CT2<br/>抄原话(兜底)+改写摘要(带ts)"]
+    CT2 --> CT3["高光块 CT3<br/>±15条字幕+邻近弹幕"]
+    CT3 --> CT4["按类型萃取 CT4<br/>SOP/决策表/论点图/概念卡"]
+    CT4 --> CT5["保真自检 CT5<br/>摘要是否被字幕支撑"]
     A0 --> D{"质量评估 C3<br/>真 / 假 / 可疑"}
+    CT5 --> D
     D -->|"虚假"| E["隔离 / 拒入库<br/>(status=rejected)"]
     D -->|"可疑"| F["降权保留 + 黄标<br/>(status=suspect)"]
     D -->|"可信"| G["优点分析 C4<br/>8 子能力萃取（A1）"]
@@ -30,6 +38,7 @@ flowchart TD
     style D fill:#fff3cd,stroke:#d39e00
     style J fill:#d4edda,stroke:#28a745
     style A0 fill:#e7f1ff,stroke:#3d7eff
+    style CT4 fill:#e7f1ff,stroke:#3d7eff
 ```
 
 **说明**：净化后先产一份**中性内容摘要 A0**（gist / bullets / key_claims，不评级不判真假），作报告开头与下游压缩基底，再进入质量评估。质量评估（多维）以「真实性」维度为分叉点——虚假直接隔离，可疑降权但保留（不替你拍板），可信才进入优点分析。文案/结构/逻辑维度在 v0.2.0 补全（A1 优点 8 子能力 / A2 结构化），作为报告丰富度，不影响 status 分叉。三条路径最终都产出 `RefinedKnowledgeObject`，只是 `status` 不同，便于下游（熔知）按可信度分级存储。
@@ -51,6 +60,12 @@ flowchart TD
 | A4 | 鉴定报告渲染 | `RefinedKnowledgeObject` | 人读 Markdown 报告（单报告，ADR-004） | 以 A0.summary 开头 + 优点 + 结构化 + 溯源 + 数值预检；降级维度显"（该维度未能生成）" | A4(#699) |
 | A5 | 编排补全 | 各层输出 | `out.report` | try/except 包裹每步，失败→空 dict 续跑；顺序 A0→assess→A1→A2→A3→A4 | A5(#701) |
 | A6 | 界面扩展 | `out.report` | Streamlit 展示 + 导出 .md / .json | 移除 v0.1.0 内联拼接，改渲染 out.report | A6(#700) |
+| C2b | 中转解析增强 | Nigredo 中转① `.md`（YAML frontmatter + `#字幕(带ts)/#高光/#弹幕/#置顶/#高赞/#AI摘要`） | `AlbedoInput.subtitle_lines / highlights / danmaku / comments_pinned / comments_top / ai_conclusion` | 分节解析，旧格式降级不崩（字幕逐条 `[mm:ss] 文本` 来自 Nigredo 上游契约） | — |
+| CT1 | 内容分类 | `subtitle_lines` + `title` + `ai_conclusion` | `content_type`（tutorial/tool_review/knowledge/opinion/entertainment/narrative/unknown） | LLM temperature=0 + 固定枚举，失败降级 unknown（确定性） | — |
+| CT2 | 关键句锚定（Route A） | `subtitle_lines` | `key_sentences`（原话带ts兜底）+ `summary{gist, bullets[带source_ts]}` | 先抄关键原话（不丢），再改写生成摘要（措辞可变、内容一致、每条指回字幕） | — |
+| CT3 | 高光上下文块 | `highlights` + `subtitle_lines` + `danmaku` + 评论 | `highlight_blocks[{ts, subtitle_window±15条, danmaku, comments}]` | 纯函数；每条高光取前后 ±15 条字幕（时间轴锚定）+ 邻近弹幕 | — |
+| CT4 | 按类型萃取 | `content_type` + `key_sentences` + `summary` + `highlight_blocks` | `content_extract`（SOP/决策表/论点图/概念卡/大纲，每条带 ts） | 分流萃取；entertainment 标记转形式线 | — |
+| CT5 | 保真自检 | `summary.bullets` + `subtitle_lines` | `grounding{checked, ungrounded[]}` | 类 SummaC NLI 蕴含判定，无支撑句标「⚠️无原文支撑」（查编造非查真假） | — |
 
 ---
 

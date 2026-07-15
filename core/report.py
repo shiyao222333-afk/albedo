@@ -298,6 +298,205 @@ def _render_numeric(out: dict) -> str:
     return "\n".join(lines)
 
 
+# ── 内容线渲染（字幕输入，content_type 非空时启用）──
+_CT_LABEL = {
+    "tutorial": "教程 / 操作类 · 可照搬 SOP",
+    "tool_review": "工具测评 · 决策参考",
+    "opinion": "观点评论 · 论点图",
+    "knowledge": "知识科普 · 概念卡",
+    "entertainment": "纯娱乐 · 转形式线",
+    "narrative": "叙事故事 · 大纲",
+    "generic": "通用要点",
+}
+
+
+def _ts_item(item):
+    """把 {text, ts} 或纯字符串渲染成带时间戳的列表项；空则 None。"""
+    if isinstance(item, dict):
+        txt = _str(item.get("text"))
+        ts = _str(item.get("ts"))
+    else:
+        txt = _str(item)
+        ts = ""
+    if not txt:
+        return None
+    return f"- {txt}" + (f" （{ts}）" if ts else "")
+
+
+def _render_content_summary(o: dict) -> str:
+    """内容线摘要：gist + bullets，每条带来源 ts；无原文支撑的标 ⚠️。"""
+    s = o.get("summary") or {}
+    gist = _str(s.get("gist"))
+    bullets = s.get("bullets") or []
+    grounding = o.get("grounding") or {}
+    ungrounded = grounding.get("ungrounded") or []
+    ug_texts = {_str(u.get("text")) for u in ungrounded}
+    lines = ["## 📌 内容摘要（讲什么 · 措辞可变 · 内容锚定字幕）", ""]
+    if not (gist or bullets):
+        return "\n".join(lines + [_DEG, ""])
+    if gist:
+        lines += [f"> {gist}", ""]
+    if bullets:
+        lines += ["**要点：**"]
+        for b in bullets:
+            if isinstance(b, dict):
+                txt = _str(b.get("text"))
+                ts = _str(b.get("source_ts"))
+            else:
+                txt = _str(b)
+                ts = ""
+            flag = " ⚠️无原文支撑" if txt in ug_texts else ""
+            suffix = f" （{ts}）" if ts else ""
+            lines.append(f"- {txt}{suffix}{flag}")
+        lines += [""]
+    checked = grounding.get("checked")
+    if checked:
+        lines += [f"_保真自检：{checked} 句已核对，{len(ungrounded)} 句无原文支撑_", ""]
+    return "\n".join(lines)
+
+
+def _render_content_extract(o: dict) -> str:
+    """按 content_type 渲染对应萃取卡片（tutorial/tool_review/opinion/knowledge/...）。"""
+    ct = _str(o.get("content_type")) or "generic"
+    ce = o.get("content_extract") or {}
+    label = _CT_LABEL.get(ct, ct)
+    lines = [f"## 🧩 内容萃取（{label}）", ""]
+    if not ce:
+        return "\n".join(lines + [_DEG, ""])
+
+    if ct == "tutorial":
+        purpose = _str(ce.get("purpose"))
+        if purpose:
+            lines += [f"**目的**：{purpose}", ""]
+        for title, key in (("前置条件", "preconditions"), ("步骤", "steps"),
+                           ("注意事项 / 坑", "warnings"), ("完成判定", "completion_checklist")):
+            items = [_ts_item(x) for x in (ce.get(key) or [])]
+            items = [x for x in items if x]
+            if items:
+                lines += [f"**{title}：**"] + items + [""]
+        return "\n".join(lines)
+
+    if ct == "tool_review":
+        for title, key in (("优点", "pros"), ("缺点", "cons")):
+            items = [_ts_item(x) for x in (ce.get(key) or [])]
+            items = [x for x in items if x]
+            if items:
+                lines += [f"**{title}：**"] + items + [""]
+        concl = _str(ce.get("conclusion"))
+        if concl:
+            lines += [f"**结论**：{concl}", ""]
+        bf = _str(ce.get("best_for"))
+        if bf:
+            lines += [f"**适合**：{bf}", ""]
+        return "\n".join(lines)
+
+    if ct == "opinion":
+        claim = _str(ce.get("claim"))
+        if claim:
+            lines += [f"**核心主张**：{claim}", ""]
+        ev = [_ts_item(x) for x in (ce.get("evidence") or [])]
+        ev = [x for x in ev if x]
+        if ev:
+            lines += ["**论据：**"] + ev + [""]
+        stance = _str(ce.get("stance"))
+        if stance:
+            lines += [f"**立场**：{stance}", ""]
+        counter = [_ts_item(x) for x in (ce.get("counter") or [])]
+        counter = [x for x in counter if x]
+        if counter:
+            lines += ["**反驳的相反观点：**"] + counter + [""]
+        return "\n".join(lines)
+
+    if ct == "knowledge":
+        concept = _str(ce.get("concept"))
+        if concept:
+            lines += [f"**概念**：{concept}", ""]
+        dfn = _str(ce.get("definition"))
+        if dfn:
+            lines += [f"**定义**：{dfn}", ""]
+        ex = [_ts_item(x) for x in (ce.get("example") or [])]
+        ex = [x for x in ex if x]
+        if ex:
+            lines += ["**例子：**"] + ex + [""]
+        return "\n".join(lines)
+
+    if ct == "entertainment":
+        note = _str(ce.get("note")) or "纯娱乐内容，内容线无可萃取信息；其价值在形式 / 表达线。"
+        return "\n".join(lines + [f"> {note}", ""])
+
+    if ct == "narrative":
+        ov = _str(ce.get("overview"))
+        if ov:
+            lines += [ov, ""]
+        for sec in (ce.get("sections") or []):
+            if not isinstance(sec, dict):
+                continue
+            ts = _str(sec.get("ts"))
+            sub = _str(sec.get("subtitle"))
+            lines.append(f"### {sub}" + (f" （{ts}）" if ts else ""))
+            pts = _list(sec.get("points"))
+            if pts:
+                lines += [f"- {p}" for p in pts]
+            lines += [""]
+        return "\n".join(lines)
+
+    # generic
+    gist = _str(ce.get("gist"))
+    if gist:
+        lines += [f"> {gist}", ""]
+    kp = [_ts_item(x) for x in (ce.get("key_points") or [])]
+    kp = [x for x in kp if x]
+    if kp:
+        lines += ["**关键要点：**"] + kp + [""]
+    return "\n".join(lines)
+
+
+def _render_key_sentences(o: dict) -> str:
+    """关键原话兜底（Route A 原文不动，供你核对摘要没丢东西）。"""
+    ks = o.get("key_sentences") or []
+    lines = ["## 📝 关键原话（兜底 · 原文不动）", ""]
+    if not ks:
+        return "\n".join(lines + [_DEG, ""])
+    for k in ks:
+        if not isinstance(k, dict):
+            continue
+        ts = _str(k.get("ts"))
+        txt = _str(k.get("text"))
+        if txt:
+            lines.append(f"- [{ts}] {txt}" if ts else f"- {txt}")
+    lines += [""]
+    return "\n".join(lines)
+
+
+def _render_highlight_blocks(o: dict) -> str:
+    """高光上下文块：高光点 + 前后 ±15 条字幕 + 邻近弹幕。"""
+    blocks = o.get("highlight_blocks") or []
+    lines = ["## ✨ 高光上下文块（高光 ±15 条字幕 + 弹幕）", ""]
+    if not blocks:
+        return "\n".join(lines + [_DEG, ""])
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        ts = _str(b.get("ts"))
+        content = _str(b.get("content"))
+        lines += [f"### 高光 {ts}：{content}" if ts else "### 高光", ""]
+        subs = b.get("subtitle_window") or []
+        if subs:
+            lines += ["字幕窗口："]
+            for s in subs:
+                if isinstance(s, dict):
+                    st = _str(s.get("ts"))
+                    txt = _str(s.get("text"))
+                    lines.append(f"- [{st}] {txt}" if st else f"- {txt}")
+            lines += [""]
+        dms = b.get("danmaku") or []
+        if dms:
+            lines += ["弹幕：" + " / ".join(_str(d.get("text")) for d in dms[:10]
+                                            if isinstance(d, dict))]
+            lines += [""]
+    return "\n".join(lines)
+
+
 # ── A4 编排主入口 ──
 def render_report(out, inp=None) -> str:
     """渲染人读 Markdown 鉴定报告（ADR-004 单报告，主交付物）。
@@ -317,12 +516,25 @@ def render_report(out, inp=None) -> str:
         f"> 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}",
         "",
     ]
-    sections = [
-        _render_verdict_card(o),
-        _render_summary(o),
-        _render_merits(o),
-        _render_structure(o),
-        _render_provenance(o, i),
-        _render_numeric(o),
-    ]
+    if o.get("content_type"):
+        # 内容线（字幕输入）：按内容类型渲染，带关键原话兜底 / 高光块 / 保真标注
+        sections = [
+            _render_verdict_card(o),
+            _render_content_summary(o),
+            _render_content_extract(o),
+            _render_key_sentences(o),
+            _render_highlight_blocks(o),
+            _render_provenance(o, i),
+            _render_numeric(o),
+        ]
+    else:
+        # 旧通用路径（非字幕输入）
+        sections = [
+            _render_verdict_card(o),
+            _render_summary(o),
+            _render_merits(o),
+            _render_structure(o),
+            _render_provenance(o, i),
+            _render_numeric(o),
+        ]
     return "\n".join(head + sections).rstrip() + "\n"

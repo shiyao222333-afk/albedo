@@ -36,6 +36,7 @@ def call_llm(
     model: str = None,
     max_tokens: int = 2048,
     timeout: int = 120,
+    seed: int = None,
 ) -> str:
     """调用 OpenAI 兼容 Chat API，返回模型回复文本。"""
     base_url = (base_url or LLM_BASE_URL).rstrip("/")
@@ -45,14 +46,17 @@ def call_llm(
         raise RuntimeError(
             "未配置 LLM API。请设置环境变量 KB_LLM_API_KEY（或项目根 .env 文件）。"
         )
+    body = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0,
+        "max_tokens": max_tokens,
+    }
+    if seed is not None:
+        body["seed"] = seed
     resp = requests.post(
         f"{base_url}/chat/completions",
-        json={
-            "model": model,
-            "messages": messages,
-            "temperature": 0,
-            "max_tokens": max_tokens,
-        },
+        json=body,
         headers={"Authorization": f"Bearer {api_key}"},
         timeout=timeout,
     )

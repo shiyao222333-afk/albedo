@@ -15,7 +15,9 @@
 """
 from __future__ import annotations
 
+import os
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -96,17 +98,30 @@ def _coerce_score(v) -> int:
     return max(0, min(100, s))
 
 
+# 自一致性投票次数：仅在 LLM 真正尊重 seed（如本地 Ollama）时才能提升稳定性。
+# DeepSeek(deepseek-v4-flash) 对复杂判定不尊重 seed，3 票在边界内容上仍是 50/50，投了也白投。
+# 故默认单调用（不浪费开销）；将来接通确定性模型时，调用方传 n_votes=3+ 即可启用投票。
+_N_TRUTH_VOTES = 1
+
+
 def assess_truthfulness(
     clean_text: str,
     *,
     context: Optional[dict] = None,
     numeric_hint: Optional[str] = None,
+    n_votes: int = None,
     **llm_kwargs,
 ) -> Truthfulness:
     """调用 LLM 对净化后文本做真实性评估，返回 Truthfulness 四维。
 
+    采用自一致性投票（self-consistency majority voting）抑制 LLM 残留非确定性：
+    对同一输入发起 n_votes 次调用（每次 seed 固定递增 0,1,2...），对 label 取多数票；
+    score 取多数票簇均值、evidence_grade 取多数票簇众数、reasoning 取簇内首个。
+    因 seed 固定，跨 run 结果完全可复现，质检关卡不再随随机性漂移。
+
     context: 可选 {platform, up_name, title} 等上下文，用于辅助判定。
     numeric_hint: 由 check_numeric_consistency() 生成的补充校验文本，注入 Prompt。
+    n_votes: 投票次数（默认 _N_TRUTH_VOTES；≥1，1 退化为单次调用）。
     llm_kwargs: 可透传 base_url / api_key / model 给 LLM 调用（便于测试）。
     """
     ctx = context or {}
@@ -118,18 +133,54 @@ def assess_truthfulness(
         title=ctx.get("title", "未知"),
         numeric_hint=numeric_hint or "（未提供数值校验信息）",
     )
-    data = call_llm_json(
-        [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_msg},
-        ],
-        **llm_kwargs,
-    )
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": user_msg},
+    ]
+
+    # 种子由投票循环统一控制，移除调用方可能误传的 seed
+    llm_kwargs.pop("seed", None)
+    n = max(1, int(n_votes) if n_votes is not None else _N_TRUTH_VOTES)
+
+    results = []
+    for i in range(n):
+        try:
+            data = call_llm_json(messages, seed=i, **llm_kwargs)
+        except RuntimeError:
+            # 单次调用失败不应让整次评估崩掉，跳过该剧投票
+            continue
+        results.append({
+            "label": _coerce_label(data.get("label")),
+            "score": _coerce_score(data.get("score")),
+            "reasoning": (data.get("reasoning") or "").strip(),
+            "evidence_grade": _coerce_grade(data.get("evidence_grade")),
+        })
+
+    if not results:
+        # 全部调用失败 → 最保守兜底
+        return Truthfulness(
+            label="suspect",
+            score=50,
+            reasoning="真实性评估 LLM 调用全部失败，已按最保守策略兜底为「存疑」。",
+            evidence_grade="L1",
+        )
+
+    # label 多数票（Counter 平票时保留先插入项，因 seed 固定故结果可复现）
+    label_votes = Counter(r["label"] for r in results)
+    majority_label, _ = label_votes.most_common(1)[0]
+
+    # 多数票簇内聚合：score 均值、grade 众数、reasoning 取簇内首个
+    cluster = [r for r in results if r["label"] == majority_label]
+    avg_score = round(sum(r["score"] for r in cluster) / len(cluster))
+    grade_votes = Counter(r["evidence_grade"] for r in cluster)
+    majority_grade, _ = grade_votes.most_common(1)[0]
+    majority_reasoning = cluster[0]["reasoning"]
+
     return Truthfulness(
-        label=_coerce_label(data.get("label")),
-        score=_coerce_score(data.get("score")),
-        reasoning=(data.get("reasoning") or "").strip(),
-        evidence_grade=_coerce_grade(data.get("evidence_grade")),
+        label=majority_label,
+        score=avg_score,
+        reasoning=majority_reasoning,
+        evidence_grade=majority_grade,
     )
 
 
