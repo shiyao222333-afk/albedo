@@ -95,9 +95,42 @@ def _grade_cn(grade: str) -> str:
     }.get(_str(grade), _str(grade) or "—")
 
 
+# 形式线：钩子类型 → 中文
+_HOOK_CN = {
+    "question": "提问式",
+    "shock": "震惊式",
+    "statement": "断言式",
+    "personal_story": "亲身故事式",
+    "contrarian": "反直觉式",
+    "value_promise": "价值承诺式",
+    "curiosity_gap": "悬念缺口式",
+    "other": "其他",
+}
+
+
+def _hook_cn(v: str) -> str:
+    return _HOOK_CN.get(_str(v), _str(v) or "—")
+
+
+def _content_score(o: dict) -> float:
+    """干货度（内容价值轴 0-1）：内容线有结构化萃取→高；纯娱乐→低。"""
+    ct = _str(o.get("content_type"))
+    if ct == "entertainment":
+        return 0.3
+    ce = o.get("content_extract") or {}
+    if isinstance(ce, dict) and ce:
+        if ct == "narrative" and ce.get("sections"):
+            return 0.7
+        return 0.8
+    s = o.get("summary") or {}
+    if isinstance(s, dict) and (s.get("bullets") or s.get("gist")):
+        return 0.6
+    return 0.4
+
+
 # ── 各章节渲染 ──
 def _render_verdict_card(out: dict) -> str:
-    """结论卡：真实性结论 + 证据分级 + 入库状态 + 可信度 + 变现标注（护栏：仅标注不判假）。"""
+    """结论卡：三轴总览（干货度 / 可信度 / 表达力）+ 真实性结论 + 证据分级 + 入库状态 + 变现标注。"""
     q = out.get("quality") or {}
     t = q.get("truthfulness") or {}
     label = _truth_label_cn(t.get("label"))
@@ -107,6 +140,10 @@ def _render_verdict_card(out: dict) -> str:
 
     trust = out.get("trust_score")
     trust_txt = f"{trust}" if isinstance(trust, (int, float)) and trust else "—"
+    # 三轴（v0.4.0 形式线加入表达力；干货度由内容萃取派生）
+    content_axis = _content_score(out)
+    form_axis = out.get("form_score")
+    form_txt = f"{form_axis}" if isinstance(form_axis, (int, float)) and form_axis else "—"
 
     mon = out.get("monetization") or {}
     if mon.get("related"):
@@ -127,7 +164,9 @@ def _render_verdict_card(out: dict) -> str:
         f"- **真实性结论**：{label}" + (f"（置信 {score}/100）" if score else ""),
         f"- **证据分级**：{grade}",
         f"- **入库状态**：{status}",
+        f"- **三轴总览**：干货度 {content_axis} ｜ 可信度 {trust_txt} ｜ 表达力 {form_txt}",
         f"- **可信度（FPF）**：{trust_txt}",
+        f"- **表达力（形式线）**：{form_txt}",
         f"- **变现标注**：{mon_txt}",
         "",
     ])
@@ -592,6 +631,141 @@ def _render_truth_track(o: dict) -> str:
     return "\n".join(lines)
 
 
+# ── 形式线渲染（v0.4.0, Track B）──
+_FORM_WEAK_NOTE = "弱代理信号（非真实留存曲线；受播放量/话题/平台文化影响）"
+
+
+def _render_form_track(o: dict) -> str:
+    """🎬 形式分析章节：钩子 / 叙事结构 / 人设 / 修辞话术 / 可复制模板 / 情绪代理 / 说服强度 / 保真自检。
+    所有视频类型都渲染（教程出教学结构、娱乐出故事骨架）。
+    """
+    ft = o.get("form_track") or {}
+    if not ft:
+        return "\n".join(["## 🎬 形式分析（怎么讲的）", "", _DEG, ""])
+
+    lines = ["## 🎬 形式分析（怎么讲的 · Track B）", ""]
+
+    # 钩子
+    hook = ft.get("hook") or {}
+    ht = _str(hook.get("hook_type"))
+    if ht or hook.get("hook_text"):
+        strength = hook.get("strength", 0) or 0
+        hts = f"{_hook_cn(ht)}（强度 {strength}/5）" if ht else f"强度 {strength}/5"
+        lines.append(f"- **开场钩子**：{hts}")
+        htext = _str(hook.get("hook_text"))
+        if htext:
+            lines.append(f"  - 钩子原句：{htext}" + (f" （{hook.get('ts','')}）" if hook.get("ts") else ""))
+        lines.append("")
+
+    # 节奏（纯函数）
+    pac = ft.get("pacing") or {}
+    if pac:
+        tier_cn = {"short": "短视频(<3分钟)", "mid": "中视频(3-15分钟)", "long": "长视频(>15分钟)", "unknown": "未知"}
+        lines.append(
+            f"- **节奏**：{tier_cn.get(_str(pac.get('length_tier')), _str(pac.get('length_tier')))}｜"
+            f"语速 {pac.get('speech_rate_wpm', 0)} 字/分｜停顿 {pac.get('pause_count', 0)} 次"
+            f"（均 {pac.get('avg_pause_s', 0)} 秒）"
+        )
+        lines.append("")
+
+    # 叙事结构
+    segs = ft.get("narrative_segments") or []
+    if segs:
+        lines.append("**叙事结构：**")
+        for s in segs:
+            if not isinstance(s, dict):
+                continue
+            ts = _str(s.get("ts"))
+            title = _str(s.get("title"))
+            purpose = _str(s.get("purpose"))
+            head = f"- {title}" + (f" （{ts}）" if ts else "")
+            lines.append(head)
+            if purpose:
+                lines.append(f"  - 这节干嘛：{purpose}")
+        lines.append("")
+
+    # 人设
+    persona = ft.get("persona") or {}
+    if persona.get("trust_base") or persona.get("perspective") or persona.get("tags"):
+        lines.append("**人设：**")
+        if persona.get("trust_base"):
+            lines.append(f"- 信任基石：{_str(persona.get('trust_base'))}")
+        if persona.get("perspective"):
+            lines.append(f"- 视角：{_str(persona.get('perspective'))}")
+        tags = persona.get("tags") or []
+        if tags:
+            lines.append(f"- 标签：{'、'.join(_str(t) for t in tags)}")
+        lines.append("")
+
+    # 修辞话术
+    devs = ft.get("rhetoric_devices") or []
+    if devs:
+        lines.append("**修辞话术（说服技巧）：**")
+        for d in devs:
+            if not isinstance(d, dict):
+                continue
+            t = _str(d.get("type"))
+            span = _str(d.get("span_text"))
+            ts = _str(d.get("ts"))
+            item = f"- {t}"
+            if span:
+                item += f"：{span}"
+            if ts:
+                item += f" （{ts}）"
+            lines.append(item)
+        lines.append("")
+
+    # 可复制模板（机器可读，供凝华消费）
+    tpl = ft.get("reusable_template") or {}
+    if tpl.get("title_formula") or tpl.get("section_skeleton") or tpl.get("persona_tags"):
+        lines.append("**可复制骨架（供下游自动生成脚本消费）：**")
+        if tpl.get("title_formula"):
+            lines.append(f"- 标题公式：{_str(tpl.get('title_formula'))}")
+        sk = tpl.get("section_skeleton") or []
+        if sk:
+            lines.append("- 段落骨架：")
+            for s in sk:
+                if not isinstance(s, dict):
+                    continue
+                ts = _str(s.get("ts"))
+                purpose = _str(s.get("purpose"))
+                lines.append(f"  - {purpose}" + (f" （{ts}）" if ts else ""))
+        pt = tpl.get("persona_tags") or []
+        if pt:
+            lines.append(f"- 人设标签：{'、'.join(_str(t) for t in pt)}")
+        lines.append("")
+
+    # 情绪曲线（弹幕弱代理）
+    emo = ft.get("emotion_proxy") or {}
+    if emo:
+        tl = emo.get("timeline") or []
+        note = _str(emo.get("note"))
+        if tl:
+            lines.append(f"- **情绪/留存代理**：弹幕密度时间轴 {len(tl)} 段（{_FORM_WEAK_NOTE}）")
+        elif note:
+            lines.append(f"- **情绪/留存代理**：{note}")
+        lines.append("")
+
+    # 说服包装强度（G1 反向桥）
+    polish = ft.get("persuasion_polish")
+    if isinstance(polish, (int, float)):
+        lines.append(f"- **说服包装强度**：{polish}（高包装+未验证证据→验真线已额外谨慎）")
+        lines.append("")
+
+    # 形式保真自检（G2）
+    faith = ft.get("form_faithfulness") or {}
+    checked = faith.get("checked")
+    if checked:
+        ug = faith.get("ungrounded") or []
+        if ug:
+            lines.append(f"_形式保真自检：{checked} 项已核对，{len(ug)} 项无字幕依据（{', '.join(_str(u.get('text',''))[:30] for u in ug)}）_")
+        else:
+            lines.append(f"_形式保真自检：{checked} 项已核对，均能在字幕找到依据_")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 # ── A4 编排主入口 ──
 def render_report(out, inp=None) -> str:
     """渲染人读 Markdown 鉴定报告（ADR-004 单报告，主交付物）。
@@ -616,6 +790,7 @@ def render_report(out, inp=None) -> str:
         sections = [
             _render_verdict_card(o),
             _render_truth_track(o),
+            _render_form_track(o),
             _render_content_summary(o),
             _render_content_extract(o),
             _render_key_sentences(o),
@@ -628,6 +803,7 @@ def render_report(out, inp=None) -> str:
         sections = [
             _render_verdict_card(o),
             _render_truth_track(o),
+            _render_form_track(o),
             _render_summary(o),
             _render_merits(o),
             _render_structure(o),

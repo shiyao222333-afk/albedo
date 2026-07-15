@@ -182,6 +182,24 @@ class ClaimVerification:
     creator_rep_delta: float = 0.0     # 本视频对 UP 主信用的 ±贡献（聚合排路线图）
 
 
+# ── 形式线（Track B, v0.4.0）数据模型 ──
+# 与内容线(讲了什么)正交：管"怎么讲的"(钩子/结构/节奏/人设/修辞/可复制骨架)。
+# 设计见 docs/RESEARCH-FORM-TRACK-2026-07-16。G1-G7 缺口均已纳入。
+# OCR 跨模态 / 跨视频人设累积 排路线图（字段预留，逻辑未做）。
+@dataclass
+class FormTrack:
+    pacing: dict = field(default_factory=dict)              # FT0 纯函数: speech_rate/pause/length_tier/duration
+    hook: dict = field(default_factory=dict)                # FT1: {hook_type, strength, hook_text, ts}
+    narrative_segments: list = field(default_factory=list)  # FT2: [{ts, title, purpose}]
+    persona: dict = field(default_factory=dict)             # FT3: {trust_base, perspective, tags}
+    rhetoric_devices: list = field(default_factory=list)    # FT4: [{type, span_text, ts}]（22种说服技巧+规则兜底）
+    reusable_template: dict = field(default_factory=dict)   # FT5: {title_formula, section_skeleton[{ts,purpose}], persona_tags}（机器可读供凝华）
+    emotion_proxy: dict = field(default_factory=dict)       # FT6: 弹幕密度时间轴(弱代理,标weak_signal)
+    persuasion_polish: float = 0.0     # G1: 说服包装强度 0-1（反向喂验真）
+    form_faithfulness: dict = field(default_factory=dict)   # G2: 形式分析保真自检 {checked, ungrounded}
+    form_score: float = 0.0            # 表达力评分 0-1（三轴结论卡用）
+
+
 # ── 精炼知识对象（主内部表示）──
 @dataclass
 class RefinedKnowledgeObject:
@@ -197,6 +215,8 @@ class RefinedKnowledgeObject:
     # —— 验真逐条（v0.3.0，仅字幕/通用路径填充）——
     claim_verifications: list = field(default_factory=list)  # list[ClaimVerification] 逐条验真记录
     truth_track: dict = field(default_factory=dict)          # 验真聚合摘要（结论卡 + 报告章节用）
+    form_track: FormTrack = field(default_factory=FormTrack) # 形式线（Track B, v0.4.0）
+    form_score: float = 0.0                                  # 表达力评分 0-1（三轴结论卡）
     quality: Quality = field(default_factory=Quality)
     merits: dict = field(default_factory=dict)
     sop: dict = field(default_factory=dict)

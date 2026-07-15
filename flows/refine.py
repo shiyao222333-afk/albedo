@@ -24,6 +24,7 @@ from typing import Optional
 from core.models import (
     AlbedoInput,
     RefinedKnowledgeObject,
+    FormTrack,
     Quality,
     Truthfulness,
     Monetization,
@@ -49,6 +50,7 @@ from core.content_track import (
 )
 from core.grounding import check_grounding
 from core.truth_track import _run_truth_track
+from core.form_track import _run_form_track
 
 
 # 维度① 真实性 label → 入库 status 映射
@@ -179,11 +181,20 @@ def refine(
         sop = structure.get("sop") or {}
         outline = structure.get("outline") or {}
 
+    # ── 形式线（v0.4.0, Track B）：所有类型都跑，管"怎么讲的"（钩子/结构/节奏/人设/修辞/模板）──
+    ft = _run_form_track(
+        inp, subtitle_lines=inp.subtitle_lines, clean_text=clean_text,
+        key_sentences=key_sentences, content_type=content_type, llm_kwargs=llm_kwargs,
+    )
+    form_track = FormTrack(**ft)
+    form_score = ft.get("form_score", 0.0)
+
     # ── 验真环节（v0.3.0）：逐条断言验真（Layer0.5 防瞎编 + Layer1 不联网快筛；
     #    Layer2 联网深验 MiniCheck 沙箱标 unverified，待本机部署启用）──
     tt = _run_truth_track(
         inp, key_sentences=key_sentences, subtitle_lines=inp.subtitle_lines,
         clean_text=clean_text, llm_kwargs=llm_kwargs,
+        persuasion_polish=ft.get("persuasion_polish", 0.0),
     )
     claim_verifications = tt["claims"]
     truth_track = tt["truth_track"]
@@ -217,6 +228,8 @@ def refine(
         grounding=grounding,
         claim_verifications=claim_verifications,
         truth_track=truth_track,
+        form_track=form_track,
+        form_score=form_score,
         trust_score=truth_track.get("trust_score", 0.0),
         ingestion_meta=IngestionMeta(
             content_type=content_type,

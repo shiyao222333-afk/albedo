@@ -2,6 +2,27 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
 
+## [0.4.0] - 2026-07-16
+
+### Added
+- **形式线（Track B：怎么讲的）**——在三轨正交架构（内容线 Track A + 验真线 + 形式线 Track B）中补齐"形式线"，分析内容"怎么讲"（娱乐 / 故事类内容线无干货、价值全在形式线）。用户拍板：核心维度全做 / 所有内容类型 / 修辞合并到形式线 / 模板机器可读供凝华 / 情绪用弹幕密度弱代理。
+  - **数据模型** `core/models.py`：新增 `FormTrack` 数据类（pacing / hook / narrative_segments / persona / rhetoric_devices / reusable_template / emotion_proxy / persuasion_polish / form_faithfulness / form_score）；`RefinedKnowledgeObject` 增 `form_track` / `form_score` 两字段（向后兼容）。
+  - **形式线流水线** `core/form_track.py`（新模块）：
+    - **FT0 节奏 + 时长分层**（纯函数，不联网）：语速(wpm) / 停顿 / 时长分层(short<180s / mid<900s / long)。
+    - **FT1 钩子**：前 10 秒字幕 → {hook_type, strength, hook_text, ts}。
+    - **FT2 叙事结构**：3-7 段 [{ts, title, purpose}]。
+    - **FT3 人设**：{trust_base, perspective, tags}。
+    - **FT4 修辞话术（单一来源）**：22 种说服技巧 + 规则兜底绝对化骗局话术 / 水词 / 模糊语（中文数字归一）；truth_track 改为 import 消费，消除重复正则维护。
+    - **FT5 可复制模板**：{title_formula, section_skeleton[{ts, purpose}], persona_tags}（机器可读，供凝华未来消费；炼真只产数据、不生成视频）。
+    - **FT6 情绪曲线**：弹幕密度时间轴弱代理（无弹幕标 weak_signal + 空，诚实不冒充真实留存）。
+    - **G1 说服包装强度（反向桥 / 真相错觉防御）**：persuasion_polish 传入验真 aggregate——高包装(≥0.7) + 证据未验证 → 验真信任分额外下调 15%。
+    - **G2 形式保真自检**：hook_text 必须出现在前 10 秒字幕、每段 ts 须是真实字幕时间戳，防 LLM 编结构。
+    - **表达力评分** `_compute_form_score`：钩子 30% + 结构 30% + 人设 20% + 节奏 20%。
+  - **编排接入** `flows/refine.py`：验真前插入形式线调用，form_score 填入对象，persuasion_polish 透传验真实现 G1。
+  - **报告三轴 + 形式章节** `core/report.py`：结论卡升级「三轴总览：干货度 / 可信度 / 表达力」；新增 `## 🎬 形式分析` 段（钩子 / 节奏 / 叙事结构 / 人设 / 修辞话术 / 可复制骨架 / 情绪代理 / 说服包装强度 / 形式保真自检）；内容线与通用路径均插入。
+  - **本期不做（列入路线图）**：OCR 跨模态（G8）、UP 主跨视频人设累积（G9）——仅定义字段 / 标注，真正累积待接项目间通信。
+  - 已通过 L1 语法（9 文件 py_compile）+ L3 端到端跑通（注入桩 LLM 验证：形式线全链路 + 验真消费形式线规则 + 三轴报告，教程类与娱乐类两路复测 23 项断言全 PASS）；临时验证脚本已清理。
+
 ## [0.3.0] - 2026-07-16
 
 ### Added

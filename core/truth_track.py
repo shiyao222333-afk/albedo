@@ -25,32 +25,15 @@ from datetime import date
 from typing import Optional
 
 from core.llm import call_llm_json
+from core.form_track import apply_rhetoric_rules, _norm_cn  # 修辞规则库单一来源（v0.4.0 迁至形式线）
 
 # Layer2 未部署说明（沙箱标 unverified 时记录的口径）
 LAYER2_NOTE = "Layer2 联网深验(MiniCheck 本地)未部署，本轮标 unverified；本机部署后启用逐条验真。"
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# 规则库（自包含，不耦合 assess.py）：话术识别（V3 遗漏6）+ 时效（Layer1c）
+# 规则库：时效（Layer1c）；修辞规则已迁至 core.form_track（单一来源，truth_track 消费）
 # ───────────────────────────────────────────────────────────────────────────
-# 绝对化骗局话术（复用 assess.py _RED_FLAGS 思路，自包含）
-_RED_FLAGS = [
-    ("zero_basis_income", re.compile(r"零基础.{0,8}月入\s*\d+\s*万|月入\s*\d+\s*万.{0,8}零基础|小白.{0,8}月入\s*\d+\s*万")),
-    ("guarantee", re.compile(r"(保证.{0,4}(赚|回本|过)|百分百|稳赚|包过|包教包会|稳赚不赔|躺赚)")),
-    ("quick_result", re.compile(r"(\d+(?:\.\d+)?)\s*(天|周)\s*(?:内|就|可|能|便|左右)*\s*(?:见效|学会|出单|回本|赚)")),
-    ("miracle_claim", re.compile(r"(永动机|一夜暴富|轻松月入|被动收入.{0,6}(万|元)|睡后收入)")),
-]
-# 水词（无出处权威暗示）
-_WEASEL = [
-    re.compile(r"(研究|调查|数据|实验|统计)\s*(表明|显示|证明|发现)"),
-    re.compile(r"(专家|学者|教授|医生|业内人士|内部)\s*(说|指出|认为|透露)"),
-    re.compile(r"(大多数|很多人|不少人|众人|大家|网友)\s*(都|普遍)?\s*(说|认为|表示|同意)"),
-    re.compile(r"(据说|听闻|听说|网上说|网传|传言|据传)"),
-    re.compile(r"(科学|权威|官方)\s*(证明|认证|推荐|认可)"),
-]
-# 模糊语（低承诺、可赖账）
-_HEDGE_STRONG = re.compile(r"(可能|也许|或许|大概|应该|估计|说不定|疑似|据说|传言|网传|大概率是|八成)")
-_HEDGE_WEAK = re.compile(r"(比较|相对|往往|一般来说|通常|一定程度上|大致|基本上|多半|倾向于|差不多|还算)")
 # 时效关键词（命中→timeboxed 限时）
 _TIMEBOXED_KW = re.compile(
     r"(规则|规定|政策|法规|平台|算法|机制|制度|条款|公约)"
@@ -59,16 +42,6 @@ _TIMEBOXED_KW = re.compile(
     r"|(门槛|限额|限制|上限|下限|配额|封顶|底线)"
     r"|(20\d\d年|今年|现在|目前|最新|当前|截至)"
 )
-
-# 轻量中文数字归一化（覆盖常见个位数 + 十），让"月入十万"也能被阿拉伯正则命中
-_CN_NUM = {
-    "一": "1", "二": "2", "两": "2", "三": "3", "四": "4",
-    "五": "5", "六": "6", "七": "7", "八": "8", "九": "9", "十": "10",
-}
-
-
-def _norm_cn(text: str) -> str:
-    return "".join(_CN_NUM.get(ch, ch) for ch in text)
 
 
 def _ts_to_sec(ts: str) -> float:
@@ -223,31 +196,21 @@ def guard_claim_faithfulness(claims: list, subtitle_lines: list, llm_kwargs: dic
 # Layer 1a: 话术识别（规则，不联网）：绝对化骗局话术 + 水词 + 模糊语（V3 遗漏6）
 # ───────────────────────────────────────────────────────────────────────────
 def detect_rhetoric(claims: list, clean_text: str = "") -> list:
-    """规则识别每条断言的话术特征，就地写入 red_flags / weasel_flag / hedge_level。
-    返回全局命中的 red_flags 标签集合（去重）。
+    """规则识别每条断言的话术特征（消费形式线单一来源规则库 apply_rhetoric_rules）。
+
+    就地写入 red_flags / weasel_flag / hedge_level。返回全局命中的 red_flags 标签集合（去重）。
+    v0.4.0 起：修辞规则正则统一归 core.form_track，此处仅消费，避免重复维护。
     """
     claims = claims or []
-    blob = _norm_cn(clean_text or "")  # 中文数字归一（"十万"→"10万"），让阿拉伯正则也能命中
+    blob = clean_text or ""
     global_flags = set()
     for c in claims:
-        quote = _norm_cn(c.get("quote", ""))
-        # 绝对化骗局话术
-        rflags = []
-        for label, pat in _RED_FLAGS:
-            if pat.search(quote) or pat.search(blob):
-                rflags.append(label)
-        c["red_flags"] = rflags
-        global_flags.update(rflags)
-        # 水词（与 LLM 抽取结果 OR）
-        if any(p.search(quote) for p in _WEASEL):
+        red_flags, weasel, lvl = apply_rhetoric_rules(c.get("quote", ""), blob)
+        c["red_flags"] = red_flags
+        global_flags.update(red_flags)
+        if weasel:
             c["weasel_flag"] = True
-        # 模糊语层级（与 LLM 抽取结果取 max）
-        lvl = c.get("hedge_level", 0) or 0
-        if _HEDGE_STRONG.search(quote):
-            lvl = max(lvl, 2)
-        elif _HEDGE_WEAK.search(quote):
-            lvl = max(lvl, 1)
-        c["hedge_level"] = lvl
+        c["hedge_level"] = max(c.get("hedge_level", 0) or 0, lvl)
     return sorted(global_flags)
 
 
@@ -340,12 +303,13 @@ def verify_claims_web(claims: list, llm_kwargs: dict = None) -> None:
 # ───────────────────────────────────────────────────────────────────────────
 # 聚合：文档级结论（落熔知字段 + 报告）
 # ───────────────────────────────────────────────────────────────────────────
-def aggregate(claims: list, dropped_count: int = 0) -> dict:
+def aggregate(claims: list, dropped_count: int = 0, persuasion_polish: float = 0.0) -> dict:
     """聚合逐条结果为文档级摘要。
 
     信任分(0-1)保守：未验证不过高（V3 遗漏5）。矛盾→0.3，话术→0.4，
     全观点/个人→0.55，其余→0.5；上限 0.6。
     severity: alert(矛盾) / warn(话术) / ok。
+    persuasion_polish(G1 反向桥)：高说服包装 + 证据未验证 → 额外谨慎（轻微下调信任）。
     """
     claims = claims or []
     n = len(claims)
@@ -374,6 +338,12 @@ def aggregate(claims: list, dropped_count: int = 0) -> dict:
         trust = 0.5
         epistemic_status = "unverified"
 
+    # G1 反向桥：高说服包装 + 未验证证据 → 额外谨慎（真相错觉防御）
+    polish_note = ""
+    if persuasion_polish >= 0.7 and severity == "ok":
+        trust = max(0.2, round(trust * 0.85, 2))
+        polish_note = "高说服包装 + 证据未验证，已额外下调信任（真相错觉防御）"
+
     contradictions = []
     for c in claims:
         for other in c.get("contradicts_with", []):
@@ -386,6 +356,8 @@ def aggregate(claims: list, dropped_count: int = 0) -> dict:
         "含限时断言（平台规则/价格/版本类），结论有时效，建议复核后谨慎采用。"
         if n_timeboxed else ""
     )
+    if polish_note:
+        recency_note = (recency_note + "；" if recency_note else "") + polish_note
 
     return {
         "n_claims": n,
@@ -399,6 +371,7 @@ def aggregate(claims: list, dropped_count: int = 0) -> dict:
         "epistemic_status": epistemic_status,
         "contradictions": contradictions,
         "recency_note": recency_note,
+        "persuasion_polish": persuasion_polish,
         "red_flags": sorted({f for c in claims for f in c.get("red_flags", [])}),
     }
 
@@ -413,6 +386,7 @@ def _run_truth_track(
     subtitle_lines: list = None,
     clean_text: str = "",
     llm_kwargs: dict = None,
+    persuasion_polish: float = 0.0,
 ) -> dict:
     """验真主流程（内容线/通用路径共用）。
 
@@ -420,6 +394,7 @@ def _run_truth_track(
       key_sentences: 内容线关键原话 [{ts, text}]（锚定抽取源；空则退化为 clean_text 切句）
       subtitle_lines: 字幕原文（Layer0.5 核查用；通用路径为空→跳过核查）
       clean_text: 净化后全文（话术规则 + 通用路径兜底抽取）
+      persuasion_polish: 形式线 G1 反向桥（高包装+未验证证据→额外谨慎）
     返回 {claims: list[dict], truth_track: dict, dropped: int}。整体不抛。
     """
     key_sentences = key_sentences or []
@@ -438,7 +413,7 @@ def _run_truth_track(
     detect_self_contradiction(kept, llm_kwargs)
     tag_recency(kept)
     verify_claims_web(kept, llm_kwargs)  # Layer2 当前标 unverified
-    truth_track = aggregate(kept, dropped)
+    truth_track = aggregate(kept, dropped, persuasion_polish=persuasion_polish)
     return {"claims": kept, "truth_track": truth_track, "dropped": dropped}
 
 

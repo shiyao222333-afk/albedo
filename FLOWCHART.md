@@ -20,8 +20,9 @@ flowchart TD
     CT2 --> CT3["高光块 CT3<br/>±15条字幕+邻近弹幕"]
     CT3 --> CT4["按类型萃取 CT4<br/>SOP/决策表/论点图/概念卡"]
     CT4 --> CT5["保真自检 CT5<br/>摘要是否被字幕支撑"]
-    A0 --> TT0["验真 TT0<br/>抽原子断言(锚定原话)"]
-    CT5 --> TT0
+    A0 --> FT["形式线 FT0-FT7<br/>钩子/叙事/节奏/人设/修辞/模板/情绪<br/>+ 说服包装强度(G1→验真)"]
+    CT5 --> FT
+    FT --> TT0["验真 TT0<br/>抽原子断言(锚定原话)"]
     TT0 --> TT1["验真 TT1<br/>Layer0.5 防瞎编<br/>(断言vs字幕NLI,丢弃无支撑)"]
     TT1 --> TT2["验真 TT2<br/>Layer1a 话术识别<br/>(绝对化/水词/模糊语)"]
     TT2 --> TT3["验真 TT3<br/>Layer1b 自相矛盾<br/>(两两NLI)"]
@@ -36,7 +37,8 @@ flowchart TD
     H --> I["溯源标记 C6<br/>video_id / up / 时间戳（A3）"]
     I --> J["精炼知识对象 C7<br/>RefinedKnowledgeObject"]
     J --> R["鉴定报告渲染 A4<br/>单 Markdown 报告"]
-    R --> AS["编排 A5<br/>A0→C3→A1→A2→A3→A4"]
+    R --> FR["报告·形式章节 A4d<br/>🎬 形式分析 + 三轴总览"]
+    FR --> AS["编排 A5<br/>A0→C3→A1→A2→A3→A4"]
     AS --> UI["界面 A6<br/>展示报告 + 导出 .md / .json"]
     UI --> K["落本地 data/out/*.json + 报告.md<br/>未来经接口交熔知"]
     E --> K
@@ -51,9 +53,13 @@ flowchart TD
     style TT3 fill:#fde2e2,stroke:#c0392b
     style TT4 fill:#fde2e2,stroke:#c0392b
     style TT5 fill:#fde2e2,stroke:#c0392b
+    style FT fill:#e8daff,stroke:#6f42c1
+    style FR fill:#e8daff,stroke:#6f42c1
 ```
 
 **说明**：净化后先产一份**中性内容摘要 A0**（gist / bullets / key_claims，不评级不判真假），作报告开头与下游压缩基底，再进入质量评估。质量评估（多维）以「真实性」维度为分叉点——虚假直接隔离，可疑降权但保留（不替你拍板），可信才进入优点分析。文案/结构/逻辑维度在 v0.2.0 补全（A1 优点 8 子能力 / A2 结构化），作为报告丰富度，不影响 status 分叉。三条路径最终都产出 `RefinedKnowledgeObject`，只是 `status` 不同，便于下游（熔知）按可信度分级存储。
+
+**形式线（Track B）** 在验真前并行运行（FT0-FT7）：分析内容"怎么讲"（钩子/叙事结构/节奏/人设/修辞话术/可复制模板/情绪曲线），其"说服包装强度"经 **G1 反向桥**传给验真——高包装(≥0.7)且证据未验证时额外下调验真信任分（真相错觉防御，防"讲得精彩=可信"误判）；形式分析结果在报告 `A4d` 段与**三轴总览（干货度 / 可信度 / 表达力）**一并呈现。修辞话术识别在形式线做单一来源（`FT4` + `apply_rhetoric_rules`），验真线 `truth_track` 改为 import 消费，避免重复正则维护。
 
 ---
 
@@ -87,6 +93,17 @@ flowchart TD
 | TT6 | 验真·聚合 | `claim_verifications` + 丢弃数 | `truth_track{severity, trust_score, epistemic_status, is_personal, contradictions, recency_note, red_flags}` | 逐条汇总为文档级结论，映射进 `ingestion_meta` 落熔知（真假/个人公开/可信度） | TT6(#84) |
 | A5c | 验真·编排接入 | 各层输出 | `out.claim_verifications` / `out.truth_track` / `status`（矛盾或话术上调 suspect） | 内容线/通用路径均调 `_run_truth_track`；验真信号上调 status，保守不误伤 | A5c(#85) |
 | A4c | 验真·报告渲染 | `RefinedKnowledgeObject` | 报告「🛡️ 逐条验真」段 | 结论卡后插入，每条断言含原话+ts+事实/观点+个人/公开+判定+标记；矛盾对单列 | A4c(#86) |
+| FT0 | 形式线·节奏+时长 | `subtitle_lines` | `pacing{speed_wpm, pauses, duration_tier}` | 纯函数不联网：语速/停顿/时长分层(short<180s/mid<900s/long) | FT0(#89) |
+| FT1 | 形式线·钩子 | `subtitle_lines[前10秒]` + `title` | `hook{hook_type, strength, hook_text, ts}` | LLM 抽前 10 秒字幕的钩子类型与力度，锚定真实 ts | FT1(#90) |
+| FT2 | 形式线·叙事结构 | `subtitle_lines` + `content_type` | `narrative_segments[{ts, title, purpose}]` | LLM 分 3-7 段，每段标 ts+目的（钩子/铺垫/干货/转折/收尾…） | FT2(#90) |
+| FT3 | 形式线·人设 | `subtitle_lines` + `title` + `clean_text` | `persona{trust_base, perspective, tags}` | LLM 判可信基底/立场/人设标签（讲得亲切≠可信，仅描述） | FT3(#90) |
+| FT4 | 形式线·修辞话术（单一来源） | `subtitle_lines` + `clean_text` | `rhetoric_devices[{type, span_text, ts}]` | 规则兜底绝对化骗局话术/水词/模糊语（中文数字归一）+ LLM 识 22 种说服技巧；`truth_track` 改为 import 消费 | FT4(#90) |
+| FT5 | 形式线·可复制模板 | `title` + `narrative_segments` + `persona` | `reusable_template{title_formula, section_skeleton[{ts, purpose}], persona_tags}` | LLM 抽机器可读骨架（供凝华未来消费；炼真只产数据、不生成视频） | FT5(#90) |
+| FT6 | 形式线·情绪曲线 | `danmaku` | `emotion_proxy{density_timeline, weak_signal}` | 弹幕密度时间轴弱代理（无弹幕标 weak_signal + 空，诚实不冒充真实留存） | FT6(#90) |
+| G1 | 形式线·说服包装强度（反向桥） | `rhetoric_devices` + `persona` | `persuasion_polish`(0-1) | 0-1 说服包装强度；≥0.7 透传验真 aggregate → 证据未验证时信任分额外 -15%（真相错觉防御） | G1(#91) |
+| G2 | 形式线·保真自检 | `hook` + `narrative_segments` + `subtitle_lines` | `form_faithfulness{checked, ungrounded[]}` | hook_text 须出现前 10 秒字幕、每段 ts 须是真实字幕时间戳，防 LLM 编结构 | G2(#90) |
+| A5d | 形式线·编排接入 | 各层输出 | `out.form_track` / `out.form_score` / `persuasion_polish`（透传验真） | 验真前插 `_run_form_track`，填 form_track/form_score，persuasion_polish 传给 `_run_truth_track` 实现 G1 | A5d(#92) |
+| A4d | 形式线·报告渲染 | `RefinedKnowledgeObject` | 报告「🎬 形式分析」段 + 三轴总览（干货度/可信度/表达力） | 结论卡升级三轴；内容线与通用路径均插「🎬 形式分析」段（钩子/节奏/叙事/人设/修辞/模板/情绪/包装强度/保真自检） | A4d(#93) |
 
 ---
 
@@ -109,6 +126,7 @@ flowchart TD
 | A6 界面扩展 `app.py` | C7 | v0.2.0 |
 | T11 批量/队列（方案A） | C1 | v0.2.0（切片 C 后置） |
 | 验真 TT0–TT6 `core/truth_track.py` + 数据模型 `core/models.py` + 接入/报告 `flows/refine.py`/`core/report.py` | TT0→TT6 / A5c / A4c | v0.3.0 |
+| 形式线 FT0–FT7 + G1/G2 `core/form_track.py` + 数据模型 `core/models.py` + 接入/报告 `flows/refine.py`/`core/report.py` | FT0→FT7 / G1 / G2 / A5d / A4d | v0.4.0 |
 
 ---
 
