@@ -28,6 +28,7 @@ from core.models import (
     Truthfulness,
     Monetization,
     Status,
+    IngestionMeta,
 )
 from core.purify import purify
 from core.assess import (
@@ -47,6 +48,7 @@ from core.content_track import (
     extract_by_type,
 )
 from core.grounding import check_grounding
+from core.truth_track import _run_truth_track
 
 
 # 维度① 真实性 label → 入库 status 映射
@@ -177,11 +179,22 @@ def refine(
         sop = structure.get("sop") or {}
         outline = structure.get("outline") or {}
 
+    # ── 验真环节（v0.3.0）：逐条断言验真（Layer0.5 防瞎编 + Layer1 不联网快筛；
+    #    Layer2 联网深验 MiniCheck 沙箱标 unverified，待本机部署启用）──
+    tt = _run_truth_track(
+        inp, key_sentences=key_sentences, subtitle_lines=inp.subtitle_lines,
+        clean_text=clean_text, llm_kwargs=llm_kwargs,
+    )
+    claim_verifications = tt["claims"]
+    truth_track = tt["truth_track"]
+
     # ── A3 溯源（纯函数，缺字段留空不抛）──
     provenance = build_provenance(inp)
 
-    # ── 由真实性 label 推入库 status ──
+    # ── 由真实性 label 推入库 status（验真矛盾/话术信号上调为存疑，保守不误伤）──
     status = _LABEL_TO_STATUS.get(truthfulness.label, Status.SUSPECT.value)
+    if truth_track.get("severity") in ("alert", "warn"):
+        status = Status.SUSPECT.value
 
     # ── 组装完整精炼对象（v0.2.0 字段全填；copywriting/structure/logic 留默认 DimensionScore，
     #    trust_score 留 0.0 待 FPF 模块；references/ingestion_meta 切片 B 补全）──
@@ -202,6 +215,15 @@ def refine(
         content_extract=content_extract,
         highlight_blocks=highlight_blocks,
         grounding=grounding,
+        claim_verifications=claim_verifications,
+        truth_track=truth_track,
+        trust_score=truth_track.get("trust_score", 0.0),
+        ingestion_meta=IngestionMeta(
+            content_type=content_type,
+            epistemic_status=truth_track.get("epistemic_status", ""),
+            is_personal=truth_track.get("is_personal", False),
+            trust_score=truth_track.get("trust_score", 0.0),
+        ),
     )
 
     # ── A4 报告渲染（纯逻辑，不抛；失败兜底占位）──

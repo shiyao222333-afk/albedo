@@ -20,8 +20,14 @@ flowchart TD
     CT2 --> CT3["高光块 CT3<br/>±15条字幕+邻近弹幕"]
     CT3 --> CT4["按类型萃取 CT4<br/>SOP/决策表/论点图/概念卡"]
     CT4 --> CT5["保真自检 CT5<br/>摘要是否被字幕支撑"]
-    A0 --> D{"质量评估 C3<br/>真 / 假 / 可疑"}
-    CT5 --> D
+    A0 --> TT0["验真 TT0<br/>抽原子断言(锚定原话)"]
+    CT5 --> TT0
+    TT0 --> TT1["验真 TT1<br/>Layer0.5 防瞎编<br/>(断言vs字幕NLI,丢弃无支撑)"]
+    TT1 --> TT2["验真 TT2<br/>Layer1a 话术识别<br/>(绝对化/水词/模糊语)"]
+    TT2 --> TT3["验真 TT3<br/>Layer1b 自相矛盾<br/>(两两NLI)"]
+    TT3 --> TT4["验真 TT4<br/>Layer1c 时效标记<br/>(verified_date+validity_class)"]
+    TT4 --> TT5["验真 TT5<br/>Layer2 联网深验<br/>(MiniCheck本地,沙箱标unverified)"]
+    TT5 --> D{"质量评估 C3 + 验真结论<br/>真 / 假 / 可疑"}
     D -->|"虚假"| E["隔离 / 拒入库<br/>(status=rejected)"]
     D -->|"可疑"| F["降权保留 + 黄标<br/>(status=suspect)"]
     D -->|"可信"| G["优点分析 C4<br/>8 子能力萃取（A1）"]
@@ -39,6 +45,12 @@ flowchart TD
     style J fill:#d4edda,stroke:#28a745
     style A0 fill:#e7f1ff,stroke:#3d7eff
     style CT4 fill:#e7f1ff,stroke:#3d7eff
+    style TT0 fill:#fde2e2,stroke:#c0392b
+    style TT1 fill:#fde2e2,stroke:#c0392b
+    style TT2 fill:#fde2e2,stroke:#c0392b
+    style TT3 fill:#fde2e2,stroke:#c0392b
+    style TT4 fill:#fde2e2,stroke:#c0392b
+    style TT5 fill:#fde2e2,stroke:#c0392b
 ```
 
 **说明**：净化后先产一份**中性内容摘要 A0**（gist / bullets / key_claims，不评级不判真假），作报告开头与下游压缩基底，再进入质量评估。质量评估（多维）以「真实性」维度为分叉点——虚假直接隔离，可疑降权但保留（不替你拍板），可信才进入优点分析。文案/结构/逻辑维度在 v0.2.0 补全（A1 优点 8 子能力 / A2 结构化），作为报告丰富度，不影响 status 分叉。三条路径最终都产出 `RefinedKnowledgeObject`，只是 `status` 不同，便于下游（熔知）按可信度分级存储。
@@ -66,6 +78,15 @@ flowchart TD
 | CT3 | 高光上下文块 | `highlights` + `subtitle_lines` + `danmaku` + 评论 | `highlight_blocks[{ts, subtitle_window±15条, danmaku, comments}]` | 纯函数；每条高光取前后 ±15 条字幕（时间轴锚定）+ 邻近弹幕 | — |
 | CT4 | 按类型萃取 | `content_type` + `key_sentences` + `summary` + `highlight_blocks` | `content_extract`（SOP/决策表/论点图/概念卡/大纲，每条带 ts） | 分流萃取；entertainment 标记转形式线 | — |
 | CT5 | 保真自检 | `summary.bullets` + `subtitle_lines` | `grounding{checked, ungrounded[]}` | 类 SummaC NLI 蕴含判定，无支撑句标「⚠️无原文支撑」（查编造非查真假） | — |
+| TT0 | 验真·抽断言 | `key_sentences`（或 clean_text 切句）+ `title` | `claim_verifications[]`（每条含 claim_id/quote/ts/factuality/scope/check_worthy/hedge/weasel） | LLM temperature=0 + 固定枚举抽原子断言，锚定真实原话（防瞎编从源头）；数据模型 `ClaimVerification` 在 `core/models.py` | TT0(#83) |
+| TT1 | 验真·Layer0.5 防瞎编 | `claim_verifications` + `subtitle_lines` | 丢弃无原文支撑的断言（faithfulness=ungrounded） | 每条抽取断言 vs 字幕原文 NLI，LLM 瞎编的（视频没有的）直接丢弃，防污染（V3 遗漏3） | TT1(#84) |
+| TT2 | 验真·话术识别 | `claim_verifications` + `clean_text` | `red_flags` / `weasel_flag` / `hedge_level`（就地写） | 规则不联网：绝对化骗局话术 + 水词 + 模糊语；中文数字归一（"十万"→"10万"） | TT2(#84) |
+| TT3 | 验真·自相矛盾 | `claim_verifications` | `contradicts_with` + `accuracy=contradicted` + 矛盾对列表 | 两两 NLI，逻辑必然不实的矛盾对标红 + 证据溯源（纯本地） | TT3(#84) |
+| TT4 | 验真·时效标记 | `claim_verifications` | `verified_date` + `validity_class`(timeboxed/evergreen) | 规则不联网：命中平台规则/价格/版本类→timeboxed 限时，接熔知 temporal_nature | TT4(#84) |
+| TT5 | 验真·联网深验(预留) | `claim_verifications` | `accuracy=unverified` + `epistemic_status` + `reasoning` | Layer2 MiniCheck 本地接口预留；沙箱/未部署标 unverified（保守，V3 遗漏5），不实际跑 | TT5(#84) |
+| TT6 | 验真·聚合 | `claim_verifications` + 丢弃数 | `truth_track{severity, trust_score, epistemic_status, is_personal, contradictions, recency_note, red_flags}` | 逐条汇总为文档级结论，映射进 `ingestion_meta` 落熔知（真假/个人公开/可信度） | TT6(#84) |
+| A5c | 验真·编排接入 | 各层输出 | `out.claim_verifications` / `out.truth_track` / `status`（矛盾或话术上调 suspect） | 内容线/通用路径均调 `_run_truth_track`；验真信号上调 status，保守不误伤 | A5c(#85) |
+| A4c | 验真·报告渲染 | `RefinedKnowledgeObject` | 报告「🛡️ 逐条验真」段 | 结论卡后插入，每条断言含原话+ts+事实/观点+个人/公开+判定+标记；矛盾对单列 | A4c(#86) |
 
 ---
 
@@ -87,6 +108,7 @@ flowchart TD
 | A5 编排补全 `flows/refine.py` | C1→C7 | v0.2.0 |
 | A6 界面扩展 `app.py` | C7 | v0.2.0 |
 | T11 批量/队列（方案A） | C1 | v0.2.0（切片 C 后置） |
+| 验真 TT0–TT6 `core/truth_track.py` + 数据模型 `core/models.py` + 接入/报告 `flows/refine.py`/`core/report.py` | TT0→TT6 / A5c / A4c | v0.3.0 |
 
 ---
 

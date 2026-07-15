@@ -30,6 +30,14 @@ _RED_FLAG_CN = {
     "miracle_claim": "暴富 / 躺赚类奇迹宣称",
 }
 
+# 验真环节绝对化骗局话术标签 → 中文（与 truth_track._RED_FLAGS 对应）
+_TRUTH_RED_FLAG_CN = {
+    "zero_basis_income": "零基础高收益承诺",
+    "guarantee": "保本/保过/稳赚话术",
+    "quick_result": "极短时间见效承诺",
+    "miracle_claim": "暴富/躺赚类奇迹宣称",
+}
+
 
 # ── 输入归一化：dataclass / dict 通吃 ──
 def _to_dict(obj):
@@ -68,6 +76,14 @@ def _status_cn(status: str) -> str:
         "suspect": "存疑待核",
         "rejected": "不建议入库（判定不实）",
     }.get(_str(status), _str(status) or "未知")
+
+
+def _fact_cn(v: str) -> str:
+    return {"factual": "事实", "opinion": "观点", "mixed": "混合"}.get(_str(v), _str(v) or "—")
+
+
+def _scope_cn(v: str) -> str:
+    return {"personal": "个人经验", "public": "公开断言"}.get(_str(v), _str(v) or "—")
 
 
 def _grade_cn(grade: str) -> str:
@@ -497,6 +513,85 @@ def _render_highlight_blocks(o: dict) -> str:
     return "\n".join(lines)
 
 
+# ── 验真逐条渲染（v0.3.0）──
+def _render_truth_track(o: dict) -> str:
+    """逐条验真章节：每条断言显示原话+ts+事实/观点+个人/公开+判定+话术/矛盾标记。
+    Layer0.5 剔除的无原文支撑断言不出现在列表（仅在总览计 dropped）。
+    """
+    tt = o.get("truth_track") or {}
+    claims = o.get("claim_verifications") or []
+    lines = ["## 🛡️ 逐条验真（真 / 假 / 可疑）", ""]
+    if not claims and not tt:
+        return "\n".join(lines + [_DEG, ""])
+
+    n = tt.get("n_claims", len(claims))
+    dropped = tt.get("n_dropped", 0)
+    sev = _str(tt.get("severity", "ok"))
+    trust = tt.get("trust_score")
+    sev_cn = {
+        "alert": "⚠️ 检出视频自相矛盾（严重存疑）",
+        "warn": "⚠️ 检出绝对化话术（存疑）",
+        "ok": "暂未检出明确矛盾 / 话术",
+    }.get(sev, "")
+    lines.append(f"- 抽取断言 **{n}** 条（Layer0.5 防瞎编剔除 {dropped} 条无原文支撑）")
+    if isinstance(trust, (int, float)):
+        lines.append(f"- 校准可信度（保守，未联网深验）：{trust}")
+    if sev_cn:
+        lines.append(f"- 信号：{sev_cn}")
+    if tt.get("recency_note"):
+        lines.append(f"- 时效：{tt['recency_note']}")
+    if tt.get("is_personal"):
+        lines.append("- 含第一人称经验主张（不可外部证伪，按内部自洽采纳）")
+    lines.append("")
+
+    for c in claims:
+        quote = _str(c.get("quote"))
+        if not quote:
+            continue
+        ts = _str(c.get("ts"))
+        badges = []
+        fac = _str(c.get("factuality"))
+        scope = _str(c.get("scope"))
+        if fac:
+            badges.append(_fact_cn(fac))
+        if scope:
+            badges.append(_scope_cn(scope))
+        head = f"- [{ts}] {quote}" if ts else f"- {quote}"
+        if badges:
+            head += f"  `({' / '.join(badges)})`"
+        lines.append(head)
+
+        notes = []
+        if _str(c.get("accuracy")) == "contradicted":
+            notes.append("⚠️ **视频自相矛盾**")
+        if c.get("red_flags"):
+            flags = "、".join(_TRUTH_RED_FLAG_CN.get(f, _str(f)) for f in c["red_flags"])
+            notes.append(f"⚠️ 绝对化话术：{flags}")
+        if c.get("weasel_flag"):
+            notes.append("💧 含水词（无出处权威暗示，谨慎采信）")
+        hl = c.get("hedge_level", 0) or 0
+        if hl >= 2:
+            notes.append("🌫️ 强模糊语（低承诺，可赖账）")
+        elif hl == 1:
+            notes.append("～ 弱保留语")
+        if _str(c.get("accuracy")) == "unverified":
+            notes.append("❓ 未联网深验（默认未验证，非假）")
+        if notes:
+            lines.append("  - " + "；".join(notes))
+
+    contradictions = tt.get("contradictions") or []
+    if contradictions:
+        lines.append("")
+        lines.append("**自相矛盾对：**")
+        for cx in contradictions:
+            lines.append(
+                f"- 断言 {cx.get('claim_id')}（{cx.get('ts', '')}） ⇄ "
+                f"断言 {cx.get('with_claim_id')}（{cx.get('with_ts', '')}）"
+            )
+    lines.append("")
+    return "\n".join(lines)
+
+
 # ── A4 编排主入口 ──
 def render_report(out, inp=None) -> str:
     """渲染人读 Markdown 鉴定报告（ADR-004 单报告，主交付物）。
@@ -520,6 +615,7 @@ def render_report(out, inp=None) -> str:
         # 内容线（字幕输入）：按内容类型渲染，带关键原话兜底 / 高光块 / 保真标注
         sections = [
             _render_verdict_card(o),
+            _render_truth_track(o),
             _render_content_summary(o),
             _render_content_extract(o),
             _render_key_sentences(o),
@@ -531,6 +627,7 @@ def render_report(out, inp=None) -> str:
         # 旧通用路径（非字幕输入）
         sections = [
             _render_verdict_card(o),
+            _render_truth_track(o),
             _render_summary(o),
             _render_merits(o),
             _render_structure(o),

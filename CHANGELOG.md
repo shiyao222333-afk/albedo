@@ -2,6 +2,23 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
 
+## [0.3.0] - 2026-07-16
+
+### Added
+- **验真环节（逐条断言验真）**——把"验真假"从 assess.py 的整条视频单源打分，升级为"逐条断言验真"（调研见 `docs/RESEARCH-TRUTH-VERIFICATION-2026-07-15.md` / `-V2-2026-07-15.md` / `-V3-GAPS-2026-07-15.md`）。用户拍板：第一层（不联网快筛）+ 第二层（联网深验）都做、经验主张放过、MiniCheck 本地部署、逐条粒度；并补"真假/事实观点/个人公开"三维度接熔知字段。
+  - **数据模型** `core/models.py`：新增 `ClaimVerification` 数据类（含 factuality 事实/观点/混合、scope 个人/公开、accuracy supported/contradicted/unverified、red_flags、contradicts_with、hedge_level、weasel_flag、validity_class、verified_date、is_visual_claim、creator_id/creator_rep_delta 等 V3 补漏字段）；`RefinedKnowledgeObject` 增 `claim_verifications` / `truth_track` 两字段（向后兼容）。
+  - **验真流水线** `core/truth_track.py`（新模块，自包含不耦合 assess.py）：
+    - **Layer 0.5 防瞎编**（最关键防坑层，V3 遗漏3）：抽断言后每条拿字幕原文 NLI 一遍，LLM 瞎编的无原文支撑断言直接丢弃，复用 `grounding.py` 思路。
+    - **Layer 1a 话术识别**（规则，不联网）：绝对化骗局话术（零基础高收益/保本稳赚/极短见效/暴富奇迹）+ 水词（无出处权威暗示）+ 模糊语（强模糊可赖账），中文数字归一（"十万"→"10万"）让阿拉伯正则也能命中。
+    - **Layer 1b 自相矛盾**（两两 NLI，逻辑必然不实）：矛盾对就地标 `contradicted` + 证据溯源，纯本地、误报极低。
+    - **Layer 1c 时效标记**：每条断言带 `verified_date` + `validity_class`（命中平台规则/价格/版本类→timeboxed 限时），接熔知 `temporal_nature`。
+    - **Layer 2 联网深验（MiniCheck 本地）接口预留**：当前沙箱/未部署标 `unverified`（保守，V3 遗漏5），不实际跑；真实启用路径已注释。
+    - **聚合**：逐条结果汇总为文档级 `severity`(alert/warn/ok) + `trust_score`(0-1 保守) + `epistemic_status` + `is_personal`，并映射进 `ingestion_meta` 落熔知。
+  - **编排接入** `flows/refine.py`：内容线/通用路径均调用 `_run_truth_track`（内容线锚定 `key_sentences` 真实原话；无字幕降级跳过 Layer0.5）；Truthfulness（假验真）保持不动作为整体参考，验真矛盾/话术信号上调 `status=suspect`（保守不误伤）。
+  - **报告逐条验真章节** `core/report.py`：新增 `## 🛡️ 逐条验真` 段（结论卡之后、内容摘要之前），每条断言显示原话+字幕ts+事实/观点+个人/公开+判定+话术/矛盾/未联网深验标记；矛盾对单独列出。
+  - **本期不做（列入路线图）**：OCR 跨模态（"画面未核查"诚实声明）、UP 主跨视频信用累积（仅定义 `creator_id/creator_rep_delta` 字段，真正累积待接项目间通信）。
+  - 已通过 L1 语法（8 文件 py_compile）+ L3 端到端跑通（注入桩 LLM 验证：Layer0.5 剔除无原文支撑断言 / 自相矛盾标红 / 中文"十万"话术命中 / 时效标记 / 逐条报告渲染，24 项断言全 PASS）。
+
 ## [0.2.1] - 2026-07-15
 
 ### Added

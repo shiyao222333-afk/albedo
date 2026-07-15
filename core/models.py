@@ -38,6 +38,30 @@ class EvidenceGrade(str, Enum):
     L4 = "L4"   # 可验证事实 / 公认可复现
 
 
+# ── 验真逐条维度枚举（v0.3.0 验真环节，对应 V2/V3 研究的三维度 + 补漏）──
+class FactualityLabel(str, Enum):
+    FACTUAL = "factual"   # 可证伪事实主张（走验真）
+    OPINION = "opinion"   # 主观价值判断（不验真假，评支撑度/自洽；给观点判真假是范畴错误）
+    MIXED = "mixed"       # 混合声称（前半事实后半观点，最难）
+
+
+class ScopeLabel(str, Enum):
+    PERSONAL = "personal"  # 第一人称经验（不可外部证伪，判内部自洽）
+    PUBLIC = "public"      # 可外部验证的公开断言（走联网深验）
+
+
+class ValidityClass(str, Enum):
+    EVERGREEN = "evergreen"   # 恒真（原理 / 概念）
+    TIMEBOXED = "timeboxed"   # 限时（平台规则 / 价格 / 版本，会变 → 结论有时效）
+    TRANSIENT = "transient"   # 易逝（短期玩法 / 热点）
+
+
+class AccuracyLabel(str, Enum):
+    SUPPORTED = "supported"       # 被证据支撑（Layer2 MiniCheck）
+    CONTRADICTED = "contradicted" # 被证据推翻（Layer2 MiniCheck / Layer1b 自相矛盾）
+    UNVERIFIED = "unverified"     # 没查（默认，非假；V3 遗漏5 保守校准）
+
+
 class Status(str, Enum):
     ACCEPTED = "accepted"
     SUSPECT = "suspect"
@@ -123,6 +147,41 @@ class IngestionMeta:
     project_source: str = "albedo-refined"  # 普通字段（已被 epistemic_status 取代分面地位）
 
 
+# ── 验真逐条记录（v0.3.0 验真环节）──
+# 每条原子断言一张"验真身份证"：来自字幕原话 → 分类(事实/观点, 个人/公开)
+# → 防瞎编(Layer0.5) → 话术/自相矛盾/时效(Layer1) → 逐条验真(Layer2, MiniCheck 本地)。
+# 设计见 docs/RESEARCH-TRUTH-VERIFICATION-V2/V3。OCR 跨模态与跨视频信用累积排路线图。
+@dataclass
+class ClaimVerification:
+    claim_id: str = ""                 # 稳定 id: c0 / c1 / ...
+    quote: str = ""                    # 原话（锚定 key_sentences / 字幕，已带 ts）
+    ts: str = ""                       # 字幕时间戳 mm:ss
+    start: float = 0.0                 # 秒（锚定定位用）
+    # —— V2 三维度 ——
+    factuality: str = ""               # factual / opinion / mixed
+    scope: str = ""                    # personal / public
+    check_worthy: bool = False         # 经验主张(False) vs 可证伪事实主张(True)（V2 决策2 放过经验）
+    # —— Layer2 逐条验真结果（MiniCheck 本地；沙箱标 unverified）——
+    accuracy: str = ""                 # supported / contradicted / unverified
+    evidence_grade: str = ""           # L1-L4
+    epistemic_status: str = ""         # 落熔知 epistemic_status（证据强度轴）
+    confidence: float = 0.0            # 校准置信度 0-1（默认保守 unverified）
+    # —— V3 补漏字段 ——
+    faithfulness: str = "grounded"     # grounded / ungrounded（Layer0.5 防 LLM 瞎编断言）
+    contradicts_with: list = field(default_factory=list)  # [{claim_id, ts}]（Layer1b 自相矛盾）
+    verified_date: str = ""            # 核查日（Layer1c 时效）
+    validity_class: str = ""           # evergreen / timeboxed / transient
+    is_visual_claim: bool = False      # 画面主张（当前 unverified，OCR 排路线图）
+    cross_modal_contradiction: bool = False  # 字幕 vs 画面文字矛盾（OCR 排路线图）
+    hedge_level: int = 0               # 0 绝对 / 1 弱保留 / 2 强模糊（V3 遗漏6 话术逃避）
+    weasel_flag: bool = False          # 水词（"研究表明""专家说"无出处）
+    red_flags: list = field(default_factory=list)  # 绝对化骗局话术标签（如 guarantee / miracle_claim）
+    evidence: str = ""                 # 支撑/反证（Layer2）
+    reasoning: str = ""                # 人话解释（标可疑必须能点开看原因）
+    creator_id: str = ""               # 跨视频信用（V3 遗漏7，聚合排路线图 v0.3.x）
+    creator_rep_delta: float = 0.0     # 本视频对 UP 主信用的 ±贡献（聚合排路线图）
+
+
 # ── 精炼知识对象（主内部表示）──
 @dataclass
 class RefinedKnowledgeObject:
@@ -135,6 +194,9 @@ class RefinedKnowledgeObject:
     content_extract: dict = field(default_factory=dict) # 按类型萃取: sop/decision/claim/concept（见 core/classify.py 路由）
     highlight_blocks: list = field(default_factory=list) # 高光上下文块 [{ts, subtitle_window:[...], danmaku:[...], comments:[...]}]
     grounding: dict = field(default_factory=dict)   # 保真自检: {checked, ungrounded:[{text, ts}]}（总结是否被字幕原文支撑）
+    # —— 验真逐条（v0.3.0，仅字幕/通用路径填充）——
+    claim_verifications: list = field(default_factory=list)  # list[ClaimVerification] 逐条验真记录
+    truth_track: dict = field(default_factory=dict)          # 验真聚合摘要（结论卡 + 报告章节用）
     quality: Quality = field(default_factory=Quality)
     merits: dict = field(default_factory=dict)
     sop: dict = field(default_factory=dict)
