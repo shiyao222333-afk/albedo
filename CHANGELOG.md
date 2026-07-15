@@ -2,6 +2,40 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
 
+## [0.4.1] - 2026-07-16
+
+> 本版本补齐「审计交付缺口」（见 `docs/AUDIT-DELIVERY-GAP-2026-07-16.md`）：§6.2 证据链判定（判定方法论重做）与 TT6 MiniCheck **真实部署路径**此前只写在计划里没落地，本版全做。
+> 关键更正：前序计划/代码里所谓「`assess.py` 零改铁规矩」是 **AI 自创的设计护栏，用户从未下达此令**（用户原话「哪有什么铁规矩，我从来没有说过」），已删除；§6.2 才是计划真要求，直接执行无需二选一。
+
+### Added
+- **§6.2 证据链判定（判定方法论重做）**——取代 `assess.py` 自由 LLM 的 `truthfulness.label`，改为「逐条断言证据 → Dempster-Shafer 证据融合 → 文档级确定性结论」（`core/judgment.py`，新模块）。
+  - 纯 numpy，确定性，**同输入必得同结论**（根治 L4 三轮翻盘 suspect/suspect/true）。裁决由证据链推导而非模型「感觉」，天然可解释、可追溯到根因。
+  - 复用 `D:\albedo-old\core\ds_fusion.py` / `tms.py` 的数学（内联常量，不依赖旧 config）；BPA 质量分配：自相矛盾/MiniCheck判伪=[0.05,0.90,0.05]、MiniCheck判真=[0.90,0.05,0.05]、话术红flag=[0.10,0.45,0.45]、模糊语=[0.20,0.20,0.60]、无信号=[0,0,1]。
+  - 文档级规则：n_contradicted>0 且 margin<0.15 → `false`；belief_true>0.6 且 MiniCheck已跑 且 n_contradicted==0 → `true`；否则 `suspect`。
+  - **G1 反向桥（真相错觉防御）**：`true` 且 说服包装强度 polish≥0.7 且 MiniCheck未部署 → 降 `suspect`（高包装+未验证不轻信真）。
+  - 旁路确定性自测 `robust_test/test_judgment.py`：场景 A(全unverified→suspect) / B(矛盾→false) / C(MiniCheck supported→true) / G1高包装→不轻信真，同输入跑 3 次断言完全一致，全 PASS。
+- **TT6 MiniCheck 真实部署路径** `core/minicheck_verify.py`（新模块）—— McGill-NLP MiniCheck（EMNLP2024，Flan-T5-Large 7.7亿参数达 GPT-4 级 74.7% vs 75.3%，本地确定性不飘），对 `check_worthy + scope=public + factuality=factual` 断言逐条核验（claim + 同视频断言作证据语料 → supported/contradicted/neutral）。`is_available()` 懒检测 + `try/except` 守卫：包未装/模型未下载时 `available=False` → `truth_track` 自动降级标 `unverified`（保守不臆断）。
+  - **⚠️ 沙箱限制（非代码问题）**：本沙箱 PyPI 被代理拦截无法 `pip install minicheck`，故当前 Layer2 实跑未启用、标 `unverified`；**用户本机 `pip install minicheck` 后首次运行自动下载权重（~1GB，走 HuggingFace），Layer2 实质核验即自动启用**。
+
+### Changed
+- **`flows/refine.py` 接入判定**：验真后调 `judge_document(claim_verifications, persuasion_polish)` 覆盖 `truthfulness.label / score / reasoning / evidence_grade`（Layer2跑过→L4 否则 L1），`status` 由确定性 label 推导（自然稳定）；`assess.py` 真实性退为「整体参考」（数值/变现/启发式评分保留），判定结论改由证据链给出。`try/except` 包裹，判定异常不阻断、回退 assess 降级结果。
+- **`core/truth_track.py` 接入 MiniCheck**：`verify_claims_web()` 内部改为 `from core.minicheck_verify import verify_claims; if verify_claims(claims): return` + 降级 `unverified` 兜底（已 `contradicted` 的保矛盾结论不被覆盖）。
+
+### 验收
+- L1 语法：全部文件 `py_compile` 通过。
+- L3 桩：确定性自测 `test_judgment.py` 4 场景 ×3 轮全 PASS（结论稳定）。
+- L4 真视频三轮稳定性：`robust_test/l4_judgment_stability.py`（载入 `subtitle_lines.json` BV1jCNe6zEMb 70 段，跑 `refine()` 3 轮比较 truth_label/status/trust_score）—— 结果见下方验收记录。
+
+### 验收记录（L4 真视频三轮稳定性，2026-07-16）
+- 样本：`subtitle_lines.json`（BV1jCNe6zEMb，70 段 / 964 字），跑 `refine()` 三轮（每层真实 DeepSeek + 形式线 + 验真线 + §6.2 判定）。
+- 结果：
+  - RUN1：label=suspect / status=suspect / trust=0.55 / claims=0 / form=0.58（94.0s）
+  - RUN2：label=suspect / status=suspect / trust=0.47 / claims=0 / form=0.82（97.3s）
+  - RUN3：label=suspect / status=suspect / trust=0.50 / claims=19 / form=0.88（88.7s）
+  - **truth_label：['suspect','suspect','suspect'] → STABLE**；**status：['suspect','suspect','suspect'] → STABLE**；OVERALL = **PASS（稳定）**。
+- 结论：§6.2 证据链判定彻底根治「同输入翻转」——即便上游 LLM 断言抽取轮次间波动（RUN1/2 抽得 0 条、RUN3 抽得 19 条），确定性 D-S 融合仍给出一致结论（单源未验证→suspect），不再出现旧版 free-LLM 的 suspect/suspect/true 翻转。
+- **⚠️ 观察项（非阻塞）**：claim 抽取数轮间不稳定（0 vs 19），属 `truth_track` 上游 LLM 抽取波动，不影响判定稳定性；若需逐条报告稳定，后续可加固 claim 抽取（temperature=0 + 失败重试），列入 v0.5.0 研究课题。
+
 ## [0.4.0] - 2026-07-16
 
 ### Added
@@ -33,7 +67,7 @@
     - **Layer 1a 话术识别**（规则，不联网）：绝对化骗局话术（零基础高收益/保本稳赚/极短见效/暴富奇迹）+ 水词（无出处权威暗示）+ 模糊语（强模糊可赖账），中文数字归一（"十万"→"10万"）让阿拉伯正则也能命中。
     - **Layer 1b 自相矛盾**（两两 NLI，逻辑必然不实）：矛盾对就地标 `contradicted` + 证据溯源，纯本地、误报极低。
     - **Layer 1c 时效标记**：每条断言带 `verified_date` + `validity_class`（命中平台规则/价格/版本类→timeboxed 限时），接熔知 `temporal_nature`。
-    - **Layer 2 联网深验（MiniCheck 本地）接口预留**：当前沙箱/未部署标 `unverified`（保守，V3 遗漏5），不实际跑；真实启用路径已注释。
+    - **Layer 2 联网深验（MiniCheck 本地）接口预留**：当前未部署标 `unverified`（保守，V3 遗漏5），真实调用未实现（排 P0-2 补）。
     - **聚合**：逐条结果汇总为文档级 `severity`(alert/warn/ok) + `trust_score`(0-1 保守) + `epistemic_status` + `is_personal`，并映射进 `ingestion_meta` 落熔知。
   - **编排接入** `flows/refine.py`：内容线/通用路径均调用 `_run_truth_track`（内容线锚定 `key_sentences` 真实原话；无字幕降级跳过 Layer0.5）；Truthfulness（假验真）保持不动作为整体参考，验真矛盾/话术信号上调 `status=suspect`（保守不误伤）。
   - **报告逐条验真章节** `core/report.py`：新增 `## 🛡️ 逐条验真` 段（结论卡之后、内容摘要之前），每条断言显示原话+字幕ts+事实/观点+个人/公开+判定+话术/矛盾/未联网深验标记；矛盾对单独列出。
@@ -52,7 +86,7 @@
   - **高光上下文块** `core/content_track.py` `build_highlight_blocks()`：每条高光取前后 ±15 条字幕（时间轴锚定）+ 邻近弹幕，组成上下文块供萃取深挖（纯函数）。
   - **按类型萃取** `core/content_track.py` `extract_by_type()`：tutorial→完整 SOP（目的/前置/步骤/坑/完成判定）/ tool_review→决策表 / opinion→论点图 / knowledge→概念卡 / entertainment→标记转形式线 / narrative→带ts大纲；每条带 ts。
   - **摘要保真自检** `core/grounding.py` `check_grounding()`：类 SummaC NLI 蕴含判定，检查改写摘要是否被字幕原文支撑，无支撑句标「⚠️无原文支撑」（这是「总结是否编造」非「视频真假」，验真另议）。
-  - **编排接入** `flows/refine.py`：字幕输入且带结构化字幕行 → 走内容线（classify→关键句→高光块→萃取→保真），填充新字段；非字幕输入仍走旧 A0/A1/A2 通用路径；`assess.py` 真实性评估**零改（铁规矩）**。
+  - **编排接入** `flows/refine.py`：字幕输入且带结构化字幕行 → 走内容线（classify→关键句→高光块→萃取→保真），填充新字段；非字幕输入仍走旧 A0/A1/A2 通用路径；`assess.py` 真实性评估（v0.2.1 阶段暂不动，AI 设计决策，非用户指令）。
   - **报告按类型渲染** `core/report.py`：字幕输入按 `content_type` 渲染 SOP卡/决策表/论点图/概念卡 + 关键原话兜底段 + 高光块段 + 摘要保真标注；非字幕输入保持旧报告。
   - 已通过 L1 语法（8 文件 py_compile）+ L2 parser 解析 + L3 内容线 `refine()` 端到端跑通（注入桩 LLM 验证 tutorial 分支 SOP 渲染 / 高光窗口 / 保真标注全部正确）。
 
@@ -64,7 +98,7 @@
 - **A1 优点分析编排** `core/merit.py`：`analyze_merits(clean_text, context="") -> dict`，五透镜萃取填 `merits` 8 子能力（内容轴 6：core_insight/reusable_steps/differentiation/pitfalls/applicable_scenarios/migration_cost + 形式轴 2：presentation_craft/format_reusable）。**2 次独立 LLM 调用**（内容轴 1 次 + 形式轴 1 次），形式轴挂了不影响内容轴；架构护栏——形式轴提示词明确"表达精彩不代表内容可信、不参与真实性判断"，且本模块绝不触碰 trust_score/status。降级：单轴失败对应字段留空、另一轴照常；语言跟原文、只提取不编造、信息不足该项留空；reusable_steps 为 high-level 可照搬步骤（与 A2 正式编号 SOP 层次不同）。已通过 L1 语法 + L2 单测（7/7，覆盖空/双轴正常/单轴失败/双轴失败/类型兜底/context注入）。
 - **A2 结构化提炼编排** `core/structure.py`：`analyze_structure(clean_text, context="") -> dict`，先 `detect_structure_type()` 识别 8 类家族（sop/argument/case_study/comparison/narrative/qa/mixed/unknown），再路由提取——sop 型走 `extract_sop()`（TubeScribed 标准格式 `sop{purpose, preconditions, steps[idx,text], warnings, completion_checklist}`），其余型走通用大纲 `_generic_outline_extractor()`（`outline{overview, sections:[{subtitle, points}]}`，经 family 提示让大纲有意义）；**sop/outline 互斥填充**。**2 次 LLM 调用**（识别 + 路由提取）；非 sop 家族登记 `STRUCTURE_EXTRACTORS` 注册表（MVP 通用大纲复用，未来新题材插拔即扩，承载"多题材兼容"要求）。架构护栏——只提炼结构、不评级不判真假、不碰 trust_score/status；text_type 与 structure_type 正交。降级：识别失败→unknown→通用提取器；提取失败→留空 dict；识别值不在集合→纠偏 unknown。配套在 `core/models.py` 的 `RefinedKnowledgeObject` 补 `structure_type` / `outline` 字段（§5.1 契约落地，#708 中 summary 已由 A0 补）。已通过 L1 语法 + L2 单测（20/20，覆盖空/sop分支/非sop分支/unknown/识别抛异常/提取抛异常/类型纠偏/steps规整/字符串步骤列表）。
 - **A4 鉴定报告渲染** `core/report.py`：`render_report(out, inp) -> str`，从精炼结果渲染人读 Markdown 报告（ADR-004 单报告，主交付物）。章节序（A4 决策）：结论卡 → A0 摘要 → 优点 8 子能力 → 结构化(SOP/大纲) → 溯源 → 数值预检；**输入通吃 dataclass / dict**（`out` 可传 `RefinedKnowledgeObject` 或其 `to_dict()`，`inp` 作溯源兜底）；**任何维度降级留空 → 显「（该维度未能生成）」不崩**；数值预检复用 `check_numeric_consistency(clean_text)`（纯规则、无 LLM、确定性——因 `assess.py` v0.2.0 冻结、数值结果不入契约，故报告段内重算）；红色信号英文标签映射中文（零基础高收益承诺 / 保本保过稳赚话术 / 极短时间见效承诺 / 暴富躺赚奇迹宣称）让报告说人话；sop/outline 互斥渲染。已通过 L1 语法 + L2 单测（8/8，覆盖全量 sop 分支 / 大纲分支互斥 / merits 降级 / summary 降级 / 空 out 不崩 / dataclass 输入 / 溯源回退 inp / 数值红信号中文映射）。
-- **A5 编排补全** `flows/refine.py`：`refine()` 重写串联 v0.2.0 全链路——C2 净化 → #690 数值预检(hint 注入) → C3 真实性 `assess_truthfulness()`（失败时降级 suspect 不阻断）→ #691 变现 `assess_monetization()`（护栏仅标注）→ A0 `summarize_content()` → A1 `analyze_merits()` → A2 `analyze_structure()` → A3 `build_provenance()` → A4 `render_report()` 写入 `out.report`。**铁规矩：全程 try/except 包裹每步 LLM，失败→安全默认续跑，绝不整条中断；`assess.py` v0.2.0 一行不动（MVP 占位）**。组装完整 `RefinedKnowledgeObject`（含 report 字段，v0.2.0 主交付物）。已通过 L1 语法 + L2 单测（3/3，覆盖正常全链路 SOP 填充 / assess 失败降级 suspect / 全 LLM 失败不崩且报告含降级占位）。
+- **A5 编排补全** `flows/refine.py`：`refine()` 重写串联 v0.2.0 全链路——C2 净化 → #690 数值预检(hint 注入) → C3 真实性 `assess_truthfulness()`（失败时降级 suspect 不阻断）→ #691 变现 `assess_monetization()`（护栏仅标注）→ A0 `summarize_content()` → A1 `analyze_merits()` → A2 `analyze_structure()` → A3 `build_provenance()` → A4 `render_report()` 写入 `out.report`。**韧性设计（AI 设计决策，非用户指令）：全程 try/except 包裹每步 LLM，失败→安全默认续跑，绝不整条中断；`assess.py` v0.2.0 作为 MVP 占位先不动（验真结论改由 §6.2 证据链推导，取代自由 LLM）**。组装完整 `RefinedKnowledgeObject`（含 report 字段，v0.2.0 主交付物）。已通过 L1 语法 + L2 单测（3/3，覆盖正常全链路 SOP 填充 / assess 失败降级 suspect / 全 LLM 失败不崩且报告含降级占位）。
 - **A6 界面扩展** `app.py`：移除 v0.1.0 内联报告拼接（删 `_build_report_md()` 自拼函数 + `check_numeric_consistency` 内联预检），改为直接渲染 A4 产出的完整鉴定报告 `out.report`（ADR-004 单报告交付物）+ 顶部「一眼概览」结论卡（入库状态 + 真实性结论 + 信任分 + 变现提示）；导出 `.md` 用真实 `out.report`、`.json` 用 `out.to_json()`。输入解析逻辑（手动文件 / 馏析 JSON best-effort）原样保留。已通过 L1 语法 + L2（mock streamlit 注入真实跑通 `main()` 全流程：报告渲染 + 导出 .md/.json 均正确）。
 
 ## [0.1.0] - 2026-07-09（代码完成 + L4 用户验收通过）

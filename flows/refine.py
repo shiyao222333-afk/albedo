@@ -12,9 +12,9 @@ refine() 是 v0.2.0 的完整对外入口，串联：
   A4 报告       render_report() → 写入 out.report
 组装完整 RefinedKnowledgeObject 返回。
 
-铁规矩（A5 决策）：
+AI 设计决策（A5，非用户指令，待确认）：
   - 全程 try/except 包裹每步 LLM，失败→安全默认续跑，绝不整条中断
-  - assess.py（C3 数值 / 变现 / 真实性）v0.2.0 一行不动（MVP 占位，等 v0.3+ 大改）
+  - assess.py（C3 数值 / 变现 / 真实性）v0.2.0 作为 MVP 占位，验真结论改由 truth_track 证据链推导（§6.2，取代自由 LLM）
   - 顺序：purify → 数值 hint → assess → A0 → A1 → A2 → A3 → A4
 """
 from __future__ import annotations
@@ -51,6 +51,7 @@ from core.content_track import (
 from core.grounding import check_grounding
 from core.truth_track import _run_truth_track
 from core.form_track import _run_form_track
+from core.judgment import judge_document  # §6.2 证据链判定（取代 assess 自由 LLM label）
 
 
 # 维度① 真实性 label → 入库 status 映射
@@ -198,6 +199,22 @@ def refine(
     )
     claim_verifications = tt["claims"]
     truth_track = tt["truth_track"]
+
+    # ── §6.2 判定方法论重做：用证据链(D-S融合)推导 truth_label，取代 assess 自由 LLM ──
+    # assess.py 退为"参考"（数值/变现/启发式评分），判定结论改由确定性证据链给出，
+    # 根治"同输入三轮翻盘 suspect/suspect/true"。
+    try:
+        verdict = judge_document(
+            claim_verifications,
+            persuasion_polish=ft.get("persuasion_polish", 0.0),
+        )
+        truthfulness.label = verdict.truth_label
+        truthfulness.score = int(verdict.confidence * 100)
+        truthfulness.reasoning = verdict.reasoning
+        truthfulness.evidence_grade = "L4" if verdict.layer2_active else "L1"
+    except Exception:
+        # 判定模块异常不阻断，回退 assess 的降级结果
+        pass
 
     # ── A3 溯源（纯函数，缺字段留空不抛）──
     provenance = build_provenance(inp)

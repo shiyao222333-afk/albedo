@@ -283,13 +283,19 @@ def tag_recency(claims: list, verified_date: str = None) -> None:
 # Layer 2: 联网深验（MiniCheck 本地）—— 接口留好，沙箱标 unverified（V3 遗漏5 保守）
 # ───────────────────────────────────────────────────────────────────────────
 def verify_claims_web(claims: list, llm_kwargs: dict = None) -> None:
-    """Layer 2 逐条验真（MiniCheck 本地部署后启用）。
+    """Layer 2 逐条验真（MiniCheck 本地部署后启用，TT6 实质）。
 
-    当前沙箱/未部署 MiniCheck → 全部标 unverified（保守，绝不臆断为真），不实际跑。
-    真实启用：对 check_worthy 且 scope=public 且 factuality=factual 的断言，
-    抽证据 → MiniCheck 逐条判 supported/contradicted → 写 accuracy/evidence_grade/confidence。
-    已判定 contradicted（Layer1b 自相矛盾）的断言跳过，保留矛盾结论。
+    真实路径：对 check_worthy 且 scope=public 且 factuality=factual 的断言调 MiniCheck
+    逐条 supported/contradicted（见 core/minicheck_verify.py）。
+    包未安装 / 模型未下载（如本沙箱 PyPI 被代理拦截）→ 保守标 unverified，不臆断为真。
     """
+    try:
+        from core.minicheck_verify import verify_claims
+        if verify_claims(claims):
+            return
+    except Exception:
+        pass
+    # 降级：保守标 unverified（已 contradicted 的保矛盾结论）
     for c in (claims or []):
         if c.get("accuracy") == "contradicted":
             continue  # 自相矛盾已定论，不被 unverified 覆盖

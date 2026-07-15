@@ -28,7 +28,8 @@ flowchart TD
     TT2 --> TT3["验真 TT3<br/>Layer1b 自相矛盾<br/>(两两NLI)"]
     TT3 --> TT4["验真 TT4<br/>Layer1c 时效标记<br/>(verified_date+validity_class)"]
     TT4 --> TT5["验真 TT5<br/>Layer2 联网深验<br/>(MiniCheck本地,沙箱标unverified)"]
-    TT5 --> D{"质量评估 C3 + 验真结论<br/>真 / 假 / 可疑"}
+    TT5 --> JUDGE["判定 JUDGE<br/>§6.2 证据链(D-S融合)<br/>逐条证据→真/假/可疑(确定性)"]
+    JUDGE --> D{"质量评估 C3 + 验真结论<br/>真 / 假 / 可疑(确定性)"}
     D -->|"虚假"| E["隔离 / 拒入库<br/>(status=rejected)"]
     D -->|"可疑"| F["降权保留 + 黄标<br/>(status=suspect)"]
     D -->|"可信"| G["优点分析 C4<br/>8 子能力萃取（A1）"]
@@ -53,6 +54,7 @@ flowchart TD
     style TT3 fill:#fde2e2,stroke:#c0392b
     style TT4 fill:#fde2e2,stroke:#c0392b
     style TT5 fill:#fde2e2,stroke:#c0392b
+    style JUDGE fill:#d1ecf1,stroke:#0c5460
     style FT fill:#e8daff,stroke:#6f42c1
     style FR fill:#e8daff,stroke:#6f42c1
 ```
@@ -89,8 +91,9 @@ flowchart TD
 | TT2 | 验真·话术识别 | `claim_verifications` + `clean_text` | `red_flags` / `weasel_flag` / `hedge_level`（就地写） | 规则不联网：绝对化骗局话术 + 水词 + 模糊语；中文数字归一（"十万"→"10万"） | TT2(#84) |
 | TT3 | 验真·自相矛盾 | `claim_verifications` | `contradicts_with` + `accuracy=contradicted` + 矛盾对列表 | 两两 NLI，逻辑必然不实的矛盾对标红 + 证据溯源（纯本地） | TT3(#84) |
 | TT4 | 验真·时效标记 | `claim_verifications` | `verified_date` + `validity_class`(timeboxed/evergreen) | 规则不联网：命中平台规则/价格/版本类→timeboxed 限时，接熔知 temporal_nature | TT4(#84) |
-| TT5 | 验真·联网深验(预留) | `claim_verifications` | `accuracy=unverified` + `epistemic_status` + `reasoning` | Layer2 MiniCheck 本地接口预留；沙箱/未部署标 unverified（保守，V3 遗漏5），不实际跑 | TT5(#84) |
-| TT6 | 验真·聚合 | `claim_verifications` + 丢弃数 | `truth_track{severity, trust_score, epistemic_status, is_personal, contradictions, recency_note, red_flags}` | 逐条汇总为文档级结论，映射进 `ingestion_meta` 落熔知（真假/个人公开/可信度） | TT6(#84) |
+| TT5 | 验真·联网深验(MiniCheck真实路径) | `claim_verifications` | `accuracy=supported/contradicted/unverified` + `confidence` + `evidence_grade=L4` | Layer2 MiniCheck 本地真实调用（`core/minicheck_verify.py`，flan-t5-large，本地确定性）；包未装/模型未下载→降级 `unverified`（保守不臆断）。详见 §6.2 验收注 | TT5(#84) |
+| TT6 | 验真·聚合 | `claim_verifications` + 丢弃数 | `truth_track{severity, trust_score, epistemic_status, is_personal, contradictions, recency_note, red_flags}` | 逐条汇总为文档级结论（真假/个人公开/可信度），映射进 `ingestion_meta` 落熔知；结论喂给 JUDGE 作证据来源 | TT6(#84) |
+| JUDGE | 判定·§6.2 证据链(D-S融合) | `claim_verifications` + `persuasion_polish`(G1) | `truthfulness.label/score/reasoning/evidence_grade`（确定性：真/假/可疑） | 逐条证据→D-S融合→文档级结论，取代 `assess.py` 自由 LLM label；同输入必得同结论（根治 L4 翻转）；G1 高包装+未验证→不轻信真（`core/judgment.py`，v0.4.1 新增） | JUDGE(#94 补) |
 | A5c | 验真·编排接入 | 各层输出 | `out.claim_verifications` / `out.truth_track` / `status`（矛盾或话术上调 suspect） | 内容线/通用路径均调 `_run_truth_track`；验真信号上调 status，保守不误伤 | A5c(#85) |
 | A4c | 验真·报告渲染 | `RefinedKnowledgeObject` | 报告「🛡️ 逐条验真」段 | 结论卡后插入，每条断言含原话+ts+事实/观点+个人/公开+判定+标记；矛盾对单列 | A4c(#86) |
 | FT0 | 形式线·节奏+时长 | `subtitle_lines` | `pacing{speed_wpm, pauses, duration_tier}` | 纯函数不联网：语速/停顿/时长分层(short<180s/mid<900s/long) | FT0(#89) |
@@ -127,6 +130,7 @@ flowchart TD
 | T11 批量/队列（方案A） | C1 | v0.2.0（切片 C 后置） |
 | 验真 TT0–TT6 `core/truth_track.py` + 数据模型 `core/models.py` + 接入/报告 `flows/refine.py`/`core/report.py` | TT0→TT6 / A5c / A4c | v0.3.0 |
 | 形式线 FT0–FT7 + G1/G2 `core/form_track.py` + 数据模型 `core/models.py` + 接入/报告 `flows/refine.py`/`core/report.py` | FT0→FT7 / G1 / G2 / A5d / A4d | v0.4.0 |
+| §6.2 判定 JUDGE + TT6 MiniCheck 真实路径 `core/judgment.py` + `core/minicheck_verify.py` + 接入 `flows/refine.py`/`core/truth_track.py` | TT5(真实路径) / JUDGE / A5c | v0.4.1 |
 
 ---
 

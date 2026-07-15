@@ -3,9 +3,9 @@
 五透镜萃取内容价值，填 merits 8 子能力（内容轴 6 + 形式轴 2）。
 2 次 LLM 调用：内容轴 1 次 + 形式轴 1 次；形式轴挂了不影响内容轴。
 
-架构护栏（铁规矩）：形式轴(A1.4/A1.5) 与 assess 真实性严格分离——
-表达精彩绝不加分给 trust_score（卖课骗局常讲得精彩但假）。
-本模块只产 merits，绝不触碰 trust_score / status（那是 assess 的职责）。
+架构约束（AI 设计决策，非用户指令）：形式轴(A1.4/A1.5) 与 assess 真实性分离——
+形式轴不直接给 trust_score 加分；仅 G1 反向桥可在"高包装+未验证"时下调验真分（保守护栏，在 refine 编排层实现）。
+本模块只产 merits，不主动改 trust_score / status（那是验真证据链的职责）。
 
 决策（2026-07-10 锁定）：
   - 2 次 LLM：内容轴(core_insight/reusable_steps/differentiation/pitfalls/
