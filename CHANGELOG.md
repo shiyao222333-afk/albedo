@@ -2,6 +2,27 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
 
+## [0.4.2] - 2026-07-16
+
+> MiniCheck 在沙箱环境**真部署完成**（v0.4.1 标注的「PyPI 被代理拦截无法安装」已突破）。Layer2 事实核验从「降级 unverified」变为「真实运行」。
+
+### Added
+- **MiniCheck 真部署（沙箱）**：经 `hf-mirror.com` 国内镜像绕过 PyPI 封锁 + 从 GitHub 源码本地 `pip install`（包不在 PyPI，仅 GitHub 发布）+ 权重经 `HF_ENDPOINT=hf-mirror.com` 下载（3.1GB flan-t5-large）+ nltk `punkt_tab` 词典从 GitHub `nltk/nltk_data` 整包提取。装好后 `is_available()=True`，Layer2 真核验自动启用。
+
+### Fixed
+- **`core/minicheck_verify.py` API 修正**（原代码按猜测写，运行时必报错）：
+  - `scorer.predict(...)` → 正确 `scorer.score(docs=corpus, claims=claims_text)`（MiniCheck 实际 API）。
+  - 返回值按 4 元组解析，取 `pred_labels`(0=unsupported / 1=supported) 与 `support_probs`。
+  - **MiniCheck 是二分类**（supported/unsupported），非三态字符串；映射：pred==1→`supported`，pred==0→`unverified`（保守，不臆断 contradicted）。
+  - 导入路径 `from minicheck import MiniCheck` → `from minicheck.minicheck import MiniCheck`；移除不支持的 `device=` 参数（内部自动选 GPU/CPU）。
+  - 新增 `MINICHECK_CACHE` 环境变量支持（指定权重缓存目录）。
+- **`core/truth_track.py` 修复自指误判**：`verify_claims_web` 现接收 `subtitle_lines`（视频字幕原文）作 MiniCheck 的 `docs` 证据语料，不再用断言自身当证据（原写法导致每条 claim 都易判 supported）。真实长字幕场景验证：假断言正确判 unsupported(P=0.01)、真断言正确判 supported(P=0.98)。
+
+### 验收
+- 真核验冒烟测试：MiniCheck 加载权重 + 推理跑通，示例 claim 判定正确（学生备考→supported P=0.98；公司亏钱→unsupported P=0.01）。
+- 集成验证（不烧 LLM key）：`verify_claims` 正确调用 MiniCheck 并写 `accuracy` 字段（`INTEGRATION_OK`）。
+- 语义验证：长字幕证据下假断言 unsupported / 真断言 supported（`LONGDOCS_OK`）；自指 bug 已修复。
+
 ## [0.4.1] - 2026-07-16
 
 > 本版本补齐「审计交付缺口」（见 `docs/AUDIT-DELIVERY-GAP-2026-07-16.md`）：§6.2 证据链判定（判定方法论重做）与 TT6 MiniCheck **真实部署路径**此前只写在计划里没落地，本版全做。

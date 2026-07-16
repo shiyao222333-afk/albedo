@@ -282,16 +282,17 @@ def tag_recency(claims: list, verified_date: str = None) -> None:
 # ───────────────────────────────────────────────────────────────────────────
 # Layer 2: 联网深验（MiniCheck 本地）—— 接口留好，沙箱标 unverified（V3 遗漏5 保守）
 # ───────────────────────────────────────────────────────────────────────────
-def verify_claims_web(claims: list, llm_kwargs: dict = None) -> None:
+def verify_claims_web(claims: list, llm_kwargs: dict = None, subtitle_lines: list = None) -> None:
     """Layer 2 逐条验真（MiniCheck 本地部署后启用，TT6 实质）。
 
     真实路径：对 check_worthy 且 scope=public 且 factuality=factual 的断言调 MiniCheck
-    逐条 supported/contradicted（见 core/minicheck_verify.py）。
+    逐条 supported/unsupported（见 core/minicheck_verify.py）。
+    subtitle_lines（视频字幕原文）作为证据语料 docs，避免用断言自身当证据导致自指误判。
     包未安装 / 模型未下载（如本沙箱 PyPI 被代理拦截）→ 保守标 unverified，不臆断为真。
     """
     try:
         from core.minicheck_verify import verify_claims
-        if verify_claims(claims):
+        if verify_claims(claims, corpus=subtitle_lines):
             return
     except Exception:
         pass
@@ -418,7 +419,7 @@ def _run_truth_track(
     detect_rhetoric(kept, clean_text)
     detect_self_contradiction(kept, llm_kwargs)
     tag_recency(kept)
-    verify_claims_web(kept, llm_kwargs)  # Layer2 当前标 unverified
+    verify_claims_web(kept, llm_kwargs, subtitle_lines)  # Layer2 MiniCheck 真核验（字幕作证据）
     truth_track = aggregate(kept, dropped, persuasion_polish=persuasion_polish)
     return {"claims": kept, "truth_track": truth_track, "dropped": dropped}
 
