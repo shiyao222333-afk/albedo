@@ -21,7 +21,12 @@
 """
 from __future__ import annotations
 
+import logging
+
 from core.llm import call_llm_json
+from core.ground_extract import apply_sop_gate, apply_flag_gate
+
+logger = logging.getLogger(__name__)
 
 
 # ───────────────────────────────────────── #76 Route A ─────────────────────────────────────────
@@ -52,28 +57,43 @@ def extract_key_sentences(
         f"[{s.get('ts', '')}] {s.get('text', '')}" for s in subtitle_lines
     )
     user = f"标题：{title}\n\nAI摘要：{ai_conclusion}\n\n字幕全文：\n{subs}"
+    # 解析容错 + 预算递增由 call_llm_json 统一负责（截断自动升 4096/8192）。
     try:
         data = call_llm_json(
             [{"role": "system", "content": _KEY_SENTENCE_SYSTEM},
              {"role": "user", "content": user}],
-            max_tokens=3000,
+            max_tokens=4096,
             **(llm_kwargs or {}),
         )
-        key_sentences = data.get("key_sentences") or []
-        summary = data.get("summary") or {}
-        # 规整：确保字段存在
-        if not isinstance(summary, dict):
-            summary = {}
-        summary.setdefault("gist", "")
-        summary.setdefault("bullets", [])
-        return {"key_sentences": key_sentences, "summary": summary}
-    except Exception:
-        # 降级：无关键句，摘要退化为 AI 摘要/标题
+    except Exception as e:
+        logger.warning("extract_key_sentences 抽取失败，降级：%s", e)
         return {
             "key_sentences": [],
-            "summary": {"gist": ai_conclusion or title,
-                        "bullets": []},
+            "summary": {"gist": ai_conclusion or title, "bullets": []},
         }
+    key_sentences = data.get("key_sentences") or []
+    summary = data.get("summary") or {}
+    # AD4：关键原话被截断成空 → 升 max_tokens 重试一次（DeepSeek 不稳定时兜底）
+    if not key_sentences:
+        try:
+            data2 = call_llm_json(
+                [{"role": "system", "content": _KEY_SENTENCE_SYSTEM},
+                 {"role": "user", "content": user}],
+                max_tokens=8192,
+                **(llm_kwargs or {}),
+            )
+            if data2.get("key_sentences"):
+                key_sentences = data2["key_sentences"]
+                if not summary:
+                    summary = data2.get("summary") or {}
+        except Exception as e:
+            logger.warning("extract_key_sentences 升额重试仍失败：%s", e)
+    # 规整：确保字段存在
+    if not isinstance(summary, dict):
+        summary = {}
+    summary.setdefault("gist", "")
+    summary.setdefault("bullets", [])
+    return {"key_sentences": key_sentences, "summary": summary}
 
 
 # ───────────────────────────────────────── #77 高光上下文块 ─────────────────────────────────────────
@@ -149,8 +169,14 @@ def extract_by_type(
     title: str = "",
     ai_conclusion: str = "",
     llm_kwargs: dict = None,
+    subtitle_lines: list = None,
+    intent: list = None,
+    monetization: bool = False,
 ) -> dict:
-    """按内容类型分流萃取，返回对应结构 dict（每个要点带 ts 锚定）。"""
+    """按内容类型分流萃取，返回对应结构 dict（每个要点带 ts 锚定）。
+
+    subtitle_lines: 真实字幕，供 AC5 锚定闸门核对 SOP/大纲/主张是否编造。
+    """
     ks_text = "\n".join(f"[{k.get('ts','')}] {k.get('text','')}" for k in key_sentences)
     hl_text = "\n\n".join(
         f"【高光 {b.get('ts','')}】{b.get('content','')}\n"
@@ -160,26 +186,42 @@ def extract_by_type(
     )
     context = f"标题：{title}\n\nAI摘要：{ai_conclusion}\n\n关键原话：\n{ks_text}\n\n高光上下文：\n{hl_text}"
 
+    # AC1 路由护栏：揭秘/吐槽类即使被误判为 tutorial，也不走 SOP 萃取
+    # （避免把"被曝光的对方操作"当成可照搬步骤编造出来——鲁棒性测试 run2/run3 致命问题）
+    if content_type == "tutorial" and intent and ("揭秘曝光" in intent or "吐槽" in intent):
+        content_type = "opinion"
+
     if content_type == "tutorial":
-        return _extract_sop(context, llm_kwargs)
-    if content_type == "tool_review":
-        return _extract_decision(context, llm_kwargs)
-    if content_type == "opinion":
-        return _extract_claim(context, llm_kwargs)
-    if content_type == "knowledge":
-        return _extract_concept(context, llm_kwargs)
-    if content_type == "entertainment":
-        return {"route_to_form": True,
-                "note": "纯娱乐内容，内容线无信息可萃取；其价值在形式/表达线（研究它怎么勾人、人设、节奏）。"}
-    if content_type == "narrative":
-        return _extract_outline(context, llm_kwargs)
-    # unknown → 通用
-    return _extract_generic(context, summary, llm_kwargs)
+        result = _extract_sop(context, llm_kwargs, subtitle_lines)
+    elif content_type == "tool_review":
+        result = _extract_decision(context, llm_kwargs)
+    elif content_type == "opinion":
+        result = _extract_claim(context, llm_kwargs, subtitle_lines)
+    elif content_type == "knowledge":
+        result = _extract_concept(context, llm_kwargs)
+    elif content_type == "entertainment":
+        result = {"route_to_form": True,
+                  "note": "纯娱乐内容，内容线无信息可萃取；其价值在形式/表达线（研究它怎么勾人、人设、节奏）。"}
+    elif content_type == "narrative":
+        result = _extract_outline(context, llm_kwargs, subtitle_lines)
+    else:
+        # unknown → 通用
+        result = _extract_generic(context, summary, llm_kwargs)
+
+    # 附加多轴元信息（供 AC2/AC3 卖家声明 / 干货度 / 报告消费）
+    result["_meta"] = {"intent": list(intent or []), "monetization": bool(monetization)}
+    return result
 
 
-def _extract_sop(context: str, llm_kwargs: dict) -> dict:
-    """教程 → 完整 SOP（用户决策 B：连细节：准备/步骤/验证/收尾）。"""
+def _extract_sop(context: str, llm_kwargs: dict, subtitle_lines: list = None) -> dict:
+    """教程 → 完整 SOP（用户决策 B：连细节：准备/步骤/验证/收尾）。
+
+    AC5 保真：①系统提示加"严禁编造"铁律；②抽取后过锚定闸门，剔除字幕无依据的编造步骤。
+    """
     sys_p = """从视频中抽取可照搬的标准操作流程(SOP)。每条必须带 ts 锚定字幕。
+【保真铁律——严禁编造】每条步骤/前置/注意/判定必须是字幕里真实出现过的操作，
+ts 必须是真实字幕时间戳（mm:ss）。若视频并非教学型（只是评测/吐槽/揭秘/混剪），
+宁可 steps 返回空数组，也绝不要硬凑看起来合理的步骤。
 输出 JSON：
 {
   "purpose": "<这条SOP能达成什么>",
@@ -189,12 +231,20 @@ def _extract_sop(context: str, llm_kwargs: dict) -> dict:
   "completion_checklist": [{"text":"<怎么确认做对了>","ts":"mm:ss"}, ...]
 }"""
     try:
-        return {"kind": "sop", **call_llm_json(
+        data = call_llm_json(
             [{"role": "system", "content": sys_p}, {"role": "user", "content": context}],
-            max_tokens=3000, **(llm_kwargs or {}))}
+            max_tokens=3000, **(llm_kwargs or {}))
+        sop = {"kind": "sop", **data}
     except Exception:
-        return {"kind": "sop", "purpose": "", "preconditions": [], "steps": [],
-                "warnings": [], "completion_checklist": []}
+        sop = {"kind": "sop", "purpose": "", "preconditions": [], "steps": [],
+               "warnings": [], "completion_checklist": []}
+    # AC5 锚定闸门：剔除编造步骤（无字幕则不核查，全保留，避免误杀）
+    if subtitle_lines:
+        try:
+            sop = apply_sop_gate(sop, subtitle_lines)
+        except Exception as e:
+            logger.warning("SOP 锚定闸门失败，降级不过滤：%s", e)
+    return sop
 
 
 def _extract_decision(context: str, llm_kwargs: dict) -> dict:
@@ -215,8 +265,8 @@ def _extract_decision(context: str, llm_kwargs: dict) -> dict:
         return {"kind": "decision", "pros": [], "cons": [], "conclusion": "", "best_for": ""}
 
 
-def _extract_claim(context: str, llm_kwargs: dict) -> dict:
-    """观点评论 → 论点图。"""
+def _extract_claim(context: str, llm_kwargs: dict, subtitle_lines: list = None) -> dict:
+    """观点评论 → 论点图。AC5：论据/反驳项过锚定闸门，无字幕依据的标 ⚠️ 保留。"""
     sys_p = """从视频中抽取作者的核心论点与论据。每条带 ts。
 输出 JSON：
 {
@@ -226,11 +276,26 @@ def _extract_claim(context: str, llm_kwargs: dict) -> dict:
   "counter": [{"text":"<作者反驳的相反观点>","ts":"mm:ss"}, ...]
 }"""
     try:
-        return {"kind": "claim", **call_llm_json(
+        data = call_llm_json(
             [{"role": "system", "content": sys_p}, {"role": "user", "content": context}],
-            max_tokens=2500, **(llm_kwargs or {}))}
+            max_tokens=2500, **(llm_kwargs or {}))
+        claim = {"kind": "claim", **data}
     except Exception:
-        return {"kind": "claim", "claim": "", "evidence": [], "stance": "", "counter": []}
+        claim = {"kind": "claim", "claim": "", "evidence": [], "stance": "", "counter": []}
+    if subtitle_lines:
+        try:
+            ev, meta_ev = apply_flag_gate(claim.get("evidence") or [], subtitle_lines, kind="claim")
+            co, meta_co = apply_flag_gate(claim.get("counter") or [], subtitle_lines, kind="claim")
+            claim["evidence"] = ev
+            claim["counter"] = co
+            claim["_gate"] = {
+                "checked": meta_ev["checked"] + meta_co["checked"],
+                "flagged": meta_ev["flagged"] + meta_co["flagged"],
+                "reasons": meta_ev["reasons"] + meta_co["reasons"],
+            }
+        except Exception as e:
+            logger.warning("claim 锚定闸门失败：%s", e)
+    return claim
 
 
 def _extract_concept(context: str, llm_kwargs: dict) -> dict:
@@ -250,8 +315,8 @@ def _extract_concept(context: str, llm_kwargs: dict) -> dict:
         return {"kind": "concept", "concept": "", "definition": "", "example": []}
 
 
-def _extract_outline(context: str, llm_kwargs: dict) -> dict:
-    """叙事故事 → 带 ts 大纲。"""
+def _extract_outline(context: str, llm_kwargs: dict, subtitle_lines: list = None) -> dict:
+    """叙事故事 → 带 ts 大纲。AC5：段落过锚定闸门，无字幕依据的标 ⚠️ 保留。"""
     sys_p = """从视频中抽取内容大纲（按时间顺序）。每条带 ts。
 输出 JSON：
 {
@@ -259,11 +324,28 @@ def _extract_outline(context: str, llm_kwargs: dict) -> dict:
   "sections": [{"ts":"mm:ss","subtitle":"<段落主题>","points":["<要点>", ...]}, ...]
 }"""
     try:
-        return {"kind": "outline", **call_llm_json(
+        data = call_llm_json(
             [{"role": "system", "content": sys_p}, {"role": "user", "content": context}],
-            max_tokens=2500, **(llm_kwargs or {}))}
+            max_tokens=2500, **(llm_kwargs or {}))
+        outline = {"kind": "outline", "overview": _str(data.get("overview")), "sections": data.get("sections") or []}
     except Exception:
-        return {"kind": "outline", "overview": "", "sections": []}
+        outline = {"kind": "outline", "overview": "", "sections": []}
+    sections = outline.get("sections") or []
+    if subtitle_lines and sections:
+        # 段落可核对文本 = 主题 + 要点拼接
+        sec_items = [
+            {"ts": _str(s.get("ts", "")), "text": _str(s.get("subtitle", "")) + " " + " ".join(_str(p) for p in (s.get("points") or []))}
+            for s in sections if isinstance(s, dict)
+        ]
+        try:
+            gated, meta = apply_flag_gate(sec_items, subtitle_lines, kind="outline")
+            for s, g in zip(sections, gated):
+                if isinstance(s, dict) and g.get("_ungrounded"):
+                    s["_ungrounded"] = g["_ungrounded"]
+            outline["_gate"] = meta
+        except Exception as e:
+            logger.warning("outline 锚定闸门失败：%s", e)
+    return outline
 
 
 def _extract_generic(context: str, summary: dict, llm_kwargs: dict) -> dict:
@@ -274,3 +356,11 @@ def _extract_generic(context: str, summary: dict, llm_kwargs: dict) -> dict:
         "gist": summary.get("gist", "") if isinstance(summary, dict) else "",
         "key_points": bullets,
     }
+
+
+def _str(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v.strip()
+    return str(v).strip()

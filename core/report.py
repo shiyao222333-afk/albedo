@@ -113,37 +113,74 @@ def _hook_cn(v: str) -> str:
 
 
 def _content_score(o: dict) -> float:
-    """干货度（内容价值轴 0-1）：内容线有结构化萃取→高；纯娱乐→低。"""
+    """干货度（内容价值轴 0-1，AC3：按锚定通过条目数计，避免虚高）。
+
+    有字幕依据的可萃取条目越多 → 干货度越高；纯娱乐固定低。
+    卖课教程（tutorial + 卖货意图）不高抬干货度（促销内容不夸大可照搬价值）。
+    """
     ct = _str(o.get("content_type"))
     if ct == "entertainment":
         return 0.3
     ce = o.get("content_extract") or {}
-    if isinstance(ce, dict) and ce:
-        if ct == "narrative" and ce.get("sections"):
-            return 0.7
-        return 0.8
-    s = o.get("summary") or {}
-    if isinstance(s, dict) and (s.get("bullets") or s.get("gist")):
-        return 0.6
-    return 0.4
+    meta = (ce.get("_meta") or {}) if isinstance(ce, dict) else {}
+    intent = meta.get("intent") or []
+    # 锚定通过的抽取条目数（有依据 = 真干货）
+    anchored = 0
+    if isinstance(ce, dict):
+        if ct == "tutorial":
+            g = ce.get("_gate") or {}
+            if g.get("checked"):
+                anchored = g.get("checked", 0) - g.get("dropped", 0)
+            else:
+                anchored = len(ce.get("steps", []) or []) + len(ce.get("preconditions", []) or [])
+        elif ct == "opinion":
+            anchored = len(ce.get("evidence", []) or [])
+        elif ct == "knowledge":
+            anchored = len(ce.get("example", []) or [])
+        elif ct == "tool_review":
+            anchored = len(ce.get("pros", []) or []) + len(ce.get("cons", []) or [])
+        elif ct == "narrative":
+            anchored = len(ce.get("sections", []) or [])
+    # 无结构化萃取 → 看摘要
+    if anchored == 0:
+        s = o.get("summary") or {}
+        if isinstance(s, dict) and (s.get("bullets") or s.get("gist")):
+            return 0.6
+        return 0.4
+    # 干货度随锚定条目数增长，封顶 1.0
+    score = min(1.0, 0.25 + 0.1 * anchored)
+    # 卖课教程不高抬干货度（AC3：促销内容不夸大可照搬价值）
+    if ct == "tutorial" and "卖货" in intent:
+        score = min(score, 0.6)
+    return round(score, 2)
 
 
 # ── 各章节渲染 ──
 def _render_verdict_card(out: dict) -> str:
-    """结论卡：三轴总览（干货度 / 可信度 / 表达力）+ 真实性结论 + 证据分级 + 入库状态 + 变现标注。"""
+    """结论卡：三轴总览（干货度 / 自洽置信 / 表达力）+ 真实性结论 + 证据分级 + 入库状态 + 变现标注。"""
     q = out.get("quality") or {}
     t = q.get("truthfulness") or {}
     label = _truth_label_cn(t.get("label"))
-    score = _str(t.get("score"))
-    grade = _grade_cn(t.get("evidence_grade"))
+    raw_grade = _str(t.get("evidence_grade"))
+    grade = _grade_cn(raw_grade)
+    score = t.get("score")
+    score_txt = f"{score}" if isinstance(score, (int, float)) and score else ""
+    # AF1：非"外部已验证"的"真实"→标注为视频自洽·待外部核实，
+    # 涵盖 MiniCheck 本地字幕核验 / 仅主张自洽（均未联网外部核查）两种情形。
+    if label == "真实" and _str(t.get("verification_level")) != "externally_verified":
+        label_disp = "真实（视频自洽·待外部核实）"
+    else:
+        label_disp = label
+
     status = _status_cn(out.get("status"))
 
     trust = out.get("trust_score")
     trust_txt = f"{trust}" if isinstance(trust, (int, float)) and trust else "—"
-    # 三轴（v0.4.0 形式线加入表达力；干货度由内容萃取派生）
+    # 三轴（v0.4.0 形式线加入表达力；干货度由内容萃取派生；自洽置信来自验真融合）
     content_axis = _content_score(out)
     form_axis = out.get("form_score")
     form_txt = f"{form_axis}" if isinstance(form_axis, (int, float)) and form_axis else "—"
+    self_conf = (score / 100.0) if isinstance(score, (int, float)) and score else 0.0
 
     mon = out.get("monetization") or {}
     if mon.get("related"):
@@ -161,11 +198,13 @@ def _render_verdict_card(out: dict) -> str:
     return "\n".join([
         "## 🧾 结论卡",
         "",
-        f"- **真实性结论**：{label}" + (f"（置信 {score}/100）" if score else ""),
+        f"- **真实性结论**：{label_disp}" + (f"（自洽置信 {score_txt}/100）" if score_txt else ""),
         f"- **证据分级**：{grade}",
         f"- **入库状态**：{status}",
-        f"- **三轴总览**：干货度 {content_axis} ｜ 可信度 {trust_txt} ｜ 表达力 {form_txt}",
-        f"- **可信度（FPF）**：{trust_txt}",
+        # AF2：三轴用统一的 0-1 自洽置信（来自验真融合），不再与 FPF 信任分混用"可信度"标签
+        f"- **三轴总览**：干货度 {content_axis} ｜ 自洽置信 {self_conf:.2f} ｜ 表达力 {form_txt}",
+        # FPF 信任分单独标注，明确"单源未联网深验·仅供参考"，避免与自洽置信打架
+        f"- **入库信任分（FPF）**：{trust_txt}（单源未联网深验，仅供参考）",
         f"- **表达力（形式线）**：{form_txt}",
         f"- **变现标注**：{mon_txt}",
         "",
@@ -366,16 +405,20 @@ _CT_LABEL = {
 
 
 def _ts_item(item):
-    """把 {text, ts} 或纯字符串渲染成带时间戳的列表项；空则 None。"""
+    """把 {text, ts} 或纯字符串渲染成带时间戳的列表项；空则 None。
+    AC5：若 item 含 '_ungrounded'（锚定闸门判定字幕无依据）→ 追加 ⚠️ 标记。
+    """
     if isinstance(item, dict):
         txt = _str(item.get("text"))
         ts = _str(item.get("ts"))
+        flag = " ⚠️字幕无依据" if item.get("_ungrounded") else ""
     else:
         txt = _str(item)
         ts = ""
+        flag = ""
     if not txt:
         return None
-    return f"- {txt}" + (f" （{ts}）" if ts else "")
+    return f"- {txt}{flag}" + (f" （{ts}）" if ts else "")
 
 
 def _render_content_summary(o: dict) -> str:
@@ -416,6 +459,13 @@ def _render_content_extract(o: dict) -> str:
     ce = o.get("content_extract") or {}
     label = _CT_LABEL.get(ct, ct)
     lines = [f"## 🧩 内容萃取（{label}）", ""]
+    # AC2/AC3：含卖货/揭秘曝光意图 → 顶部声明，提醒勿盲目照搬/轻信
+    if isinstance(ce, dict):
+        intent = (ce.get("_meta") or {}).get("intent") or []
+        if "卖货" in intent or "揭秘曝光" in intent:
+            tags = "、".join(t for t in intent if t in ("卖货", "揭秘曝光"))
+            lines += [f"> ⚠️ **该视频含[{tags}]意图**：以下萃取仅供参照，关键操作/主张请独立核实，"
+                      f"勿盲目照搬或轻信。", ""]
     if not ce:
         return "\n".join(lines + [_DEG, ""])
 
@@ -429,6 +479,11 @@ def _render_content_extract(o: dict) -> str:
             items = [x for x in items if x]
             if items:
                 lines += [f"**{title}：**"] + items + [""]
+        # AC5 锚定闸门结果：被剔除的编造步骤
+        gate = ce.get("_gate") or {}
+        if gate.get("dropped"):
+            lines += [f"> ⚠️ **锚定闸门剔除 {gate['dropped']} 条字幕无依据的编造步骤**"
+                      f"（时间戳/文本在真实字幕中找不到依据，已自动移除，避免误导「可照搬」）", ""]
         return "\n".join(lines)
 
     if ct == "tool_review":
@@ -460,6 +515,10 @@ def _render_content_extract(o: dict) -> str:
         counter = [x for x in counter if x]
         if counter:
             lines += ["**反驳的相反观点：**"] + counter + [""]
+        # AC5 锚定闸门：论据/反驳无字幕依据 → 标 ⚠️（见上逐条）
+        gate = ce.get("_gate") or {}
+        if gate.get("flagged"):
+            lines += [f"> ⚠️ 锚定闸门标记 {gate['flagged']} 条论据/反驳在字幕中无依据（保留供你核对，不删除）", ""]
         return "\n".join(lines)
 
     if ct == "knowledge":
@@ -488,11 +547,15 @@ def _render_content_extract(o: dict) -> str:
                 continue
             ts = _str(sec.get("ts"))
             sub = _str(sec.get("subtitle"))
-            lines.append(f"### {sub}" + (f" （{ts}）" if ts else ""))
+            uflag = " ⚠️字幕无依据" if sec.get("_ungrounded") else ""
+            lines.append(f"### {sub}{uflag}" + (f" （{ts}）" if ts else ""))
             pts = _list(sec.get("points"))
             if pts:
                 lines += [f"- {p}" for p in pts]
             lines += [""]
+        gate = ce.get("_gate") or {}
+        if gate.get("flagged"):
+            lines += [f"> ⚠️ 锚定闸门标记 {gate['flagged']} 个段落标题/要点在字幕中无依据（保留供你核对，不删除）", ""]
         return "\n".join(lines)
 
     # generic
@@ -528,7 +591,7 @@ def _render_highlight_blocks(o: dict) -> str:
     blocks = o.get("highlight_blocks") or []
     lines = ["## ✨ 高光上下文块（高光 ±15 条字幕 + 弹幕）", ""]
     if not blocks:
-        return "\n".join(lines + [_DEG, ""])
+        return "\n".join(lines + ["（未提供高光数据——输入无高光时间点，非分析失败）", ""])
     for b in blocks:
         if not isinstance(b, dict):
             continue
@@ -642,6 +705,12 @@ def _render_form_track(o: dict) -> str:
     ft = o.get("form_track") or {}
     if not ft:
         return "\n".join(["## 🎬 形式分析（怎么讲的）", "", _DEG, ""])
+    # AD3：钩子/叙事段若被形式保真自检(form_faithfulness)标 ungrounded，
+    # 渲染时打 ⚠️，不伪装成权威原句/真实时间戳。
+    _faith = ft.get("form_faithfulness") or {}
+    _ug = _faith.get("ungrounded") or []
+    _ug_hook = {_str(u.get("text")) for u in _ug if u.get("what") == "hook_text"}
+    _ug_seg_ts = {_str(u.get("text")) for u in _ug if u.get("what") == "segment_ts"}
 
     lines = ["## 🎬 形式分析（怎么讲的 · Track B）", ""]
 
@@ -654,7 +723,8 @@ def _render_form_track(o: dict) -> str:
         lines.append(f"- **开场钩子**：{hts}")
         htext = _str(hook.get("hook_text"))
         if htext:
-            lines.append(f"  - 钩子原句：{htext}" + (f" （{hook.get('ts','')}）" if hook.get("ts") else ""))
+            flag = " ⚠️ 非逐字/无字幕依据" if htext in _ug_hook else ""
+            lines.append(f"  - 钩子原句：{htext}" + (f" （{hook.get('ts','')}）" if hook.get("ts") else "") + flag)
         lines.append("")
 
     # 节奏（纯函数）
@@ -679,6 +749,8 @@ def _render_form_track(o: dict) -> str:
             title = _str(s.get("title"))
             purpose = _str(s.get("purpose"))
             head = f"- {title}" + (f" （{ts}）" if ts else "")
+            if ts and ts in _ug_seg_ts:
+                head += " ⚠️ 时间戳无字幕依据（段落可能为LLM推断）"
             lines.append(head)
             if purpose:
                 lines.append(f"  - 这节干嘛：{purpose}")
@@ -749,7 +821,13 @@ def _render_form_track(o: dict) -> str:
     # 说服包装强度（G1 反向桥）
     polish = ft.get("persuasion_polish")
     if isinstance(polish, (int, float)):
-        lines.append(f"- **说服包装强度**：{polish}（高包装+未验证证据→验真线已额外谨慎）")
+        if polish >= 0.7:
+            desc, note = "高包装", "（高包装+未验证证据→验真线已额外谨慎）"
+        elif polish >= 0.4:
+            desc, note = "中包装", "（包装适中，未验证证据仍请自行判断）"
+        else:
+            desc, note = "低包装", "（包装较轻，未验证证据仍请自行判断）"
+        lines.append(f"- **说服包装强度**：{polish}（{desc}{note}）")
         lines.append("")
 
     # 形式保真自检（G2）

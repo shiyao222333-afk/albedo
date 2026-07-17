@@ -104,6 +104,7 @@ class Truthfulness:
     score: int = 0                  # 0-100
     reasoning: str = ""
     evidence_grade: str = ""        # L1-L4
+    verification_level: str = ""    # AF1: externally_verified | self_consistent
 
 
 @dataclass
@@ -168,6 +169,8 @@ class ClaimVerification:
     confidence: float = 0.0            # 校准置信度 0-1（默认保守 unverified）
     # —— V3 补漏字段 ——
     faithfulness: str = "grounded"     # grounded / ungrounded（Layer0.5 防 LLM 瞎编断言）
+    anchor_ts: str = ""                 # CE3 确定性忠实性自检锚定的字幕时间戳（溯源）
+    web_status: str = ""                # Layer3 联网核查状态："" / pending(待联网) / verified
     contradicts_with: list = field(default_factory=list)  # [{claim_id, ts}]（Layer1b 自相矛盾）
     verified_date: str = ""            # 核查日（Layer1c 时效）
     validity_class: str = ""           # evergreen / timeboxed / transient
@@ -213,7 +216,7 @@ class RefinedKnowledgeObject:
     highlight_blocks: list = field(default_factory=list) # 高光上下文块 [{ts, subtitle_window:[...], danmaku:[...], comments:[...]}]
     grounding: dict = field(default_factory=dict)   # 保真自检: {checked, ungrounded:[{text, ts}]}（总结是否被字幕原文支撑）
     # —— 验真逐条（v0.3.0，仅字幕/通用路径填充）——
-    claim_verifications: list = field(default_factory=list)  # list[ClaimVerification] 逐条验真记录
+    claim_verifications: list = field(default_factory=list)  # 运行时为 list[dict]（ClaimVerification 字段子集），report.py 按 dict 访问
     truth_track: dict = field(default_factory=dict)          # 验真聚合摘要（结论卡 + 报告章节用）
     form_track: FormTrack = field(default_factory=FormTrack) # 形式线（Track B, v0.4.0）
     form_score: float = 0.0                                  # 表达力评分 0-1（三轴结论卡）

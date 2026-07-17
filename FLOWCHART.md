@@ -22,13 +22,17 @@ flowchart TD
     CT4 --> CT5["保真自检 CT5<br/>摘要是否被字幕支撑"]
     A0 --> FT["形式线 FT0-FT7<br/>钩子/叙事/节奏/人设/修辞/模板/情绪<br/>+ 说服包装强度(G1→验真)"]
     CT5 --> FT
-    FT --> TT0["验真 TT0<br/>抽原子断言(锚定原话)"]
-    TT0 --> TT1["验真 TT1<br/>Layer0.5 防瞎编<br/>(断言vs字幕NLI,丢弃无支撑)"]
+    FT --> CE0["CE0 形式信号骨架<br/>7维显著度加权(确定性,零LLM)"]
+    CE0 --> TT0["TT0 抽原子断言<br/>自一致性 N=3(CE1+CE2)<br/>约束于CE0骨架"]
+    TT0 --> CE3["CE3 忠实性自检<br/>字幕子串/模糊匹配(确定性)<br/>ungrounded丢弃"]
+    CE3 --> CE4["CE4 主张缓存<br/>cache/{video_id}.claims.json<br/>(复查不重抽)"]
+    CE4 --> TT1["验真 TT1<br/>Layer0.5 防瞎编<br/>(断言vs字幕NLI,丢弃无支撑)"]
     TT1 --> TT2["验真 TT2<br/>Layer1a 话术识别<br/>(绝对化/水词/模糊语)"]
     TT2 --> TT3["验真 TT3<br/>Layer1b 自相矛盾<br/>(两两NLI)"]
     TT3 --> TT4["验真 TT4<br/>Layer1c 时效标记<br/>(verified_date+validity_class)"]
     TT4 --> TT5["验真 TT5<br/>Layer2 联网深验<br/>(MiniCheck本地,沙箱标unverified)"]
-    TT5 --> JUDGE["判定 JUDGE<br/>§6.2 证据链(D-S融合)<br/>逐条证据→真/假/可疑(确定性)"]
+    TT5 --> L3["Layer3 联网核查框架<br/>(无ALBEDO_SEARCH_API_KEY→pending<br/>诚实降级待联网核查)"]
+    L3 --> JUDGE["判定 JUDGE<br/>§6.2 证据链(D-S融合)<br/>逐条证据→真/假/可疑(确定性)"]
     JUDGE --> D{"质量评估 C3 + 验真结论<br/>真 / 假 / 可疑(确定性)"}
     D -->|"虚假"| E["隔离 / 拒入库<br/>(status=rejected)"]
     D -->|"可疑"| F["降权保留 + 黄标<br/>(status=suspect)"]
@@ -57,6 +61,10 @@ flowchart TD
     style JUDGE fill:#d1ecf1,stroke:#0c5460
     style FT fill:#e8daff,stroke:#6f42c1
     style FR fill:#e8daff,stroke:#6f42c1
+    style CE0 fill:#d4edda,stroke:#28a745
+    style CE3 fill:#d4edda,stroke:#28a745
+    style CE4 fill:#d4edda,stroke:#28a745
+    style L3 fill:#fff3cd,stroke:#d39e00
 ```
 
 **说明**：净化后先产一份**中性内容摘要 A0**（gist / bullets / key_claims，不评级不判真假），作报告开头与下游压缩基底，再进入质量评估。质量评估（多维）以「真实性」维度为分叉点——虚假直接隔离，可疑降权但保留（不替你拍板），可信才进入优点分析。文案/结构/逻辑维度在 v0.2.0 补全（A1 优点 8 子能力 / A2 结构化），作为报告丰富度，不影响 status 分叉。三条路径最终都产出 `RefinedKnowledgeObject`，只是 `status` 不同，便于下游（熔知）按可信度分级存储。
@@ -87,6 +95,11 @@ flowchart TD
 | CT4 | 按类型萃取 | `content_type` + `key_sentences` + `summary` + `highlight_blocks` | `content_extract`（SOP/决策表/论点图/概念卡/大纲，每条带 ts） | 分流萃取；entertainment 标记转形式线 | — |
 | CT5 | 保真自检 | `summary.bullets` + `subtitle_lines` | `grounding{checked, ungrounded[]}` | 类 SummaC NLI 蕴含判定，无支撑句标「⚠️无原文支撑」（查编造非查真假） | — |
 | TT0 | 验真·抽断言 | `key_sentences`（或 clean_text 切句）+ `title` | `claim_verifications[]`（每条含 claim_id/quote/ts/factuality/scope/check_worthy/hedge/weasel） | LLM temperature=0 + 固定枚举抽原子断言，锚定真实原话（防瞎编从源头）；数据模型 `ClaimVerification` 在 `core/models.py` | TT0(#83) |
+| CE0 | 抽主张·形式信号骨架 | `subtitle_lines`（带 ts/start/end/text）+ `clean_text`（FT4 规则兜底）+ `danmaku`（FT6 弱代理） | `skeleton[]`（Top-K=12，每句带 ts/原话/显著度/7维信号标签/命中话术/重叠窗口上下文） | **确定性、零 LLM**：7 维显著度加权（pos/dur/rep/rhet/punct/emo/hook，预设权重和=1.0），复用 `form_track.apply_rhetoric_rules` + 伪声学（语速/停顿/标点/字符频率中心度）；治 DeepSeek 不稳的源头 | CE0(#123) |
+| CE1+CE2 | 抽主张·自一致性并集 | `skeleton` + `title` | `claims[]`（CE0 约束内抽 N=3 次，归一化去重并集，非投票） | 约束解码 `response_format=json_object` + 固定 CE0 骨架为"必须覆盖范围"；N=3 抽样取并集（某次抽风漏的别的次补上），重叠窗口防跨句主张漏抽 | CE1+CE2(#125) |
+| CE3 | 抽主张·忠实性自检 | `claims[]` + `subtitle_lines` | `kept[]`（grounded + anchor_ts）/ 丢弃 ungrounded | **确定性、零 LLM**：每条主张 vs 字幕全文子串/模糊匹配（跨句子句拆分），幻影丢弃（补 faithfulness gap） | CE3(#126) |
+| CE4 | 抽主张·缓存 | `video_id` + `claims[]`（CE3 通过后） | `cache/{video_id}.claims.json`（落盘） | 抽完落盘，复查/出报告复用不重抽 → 从协议层冻结 claim_quotes 漂移 | CE4(#127) |
+| L3 | 验真·Layer3 联网核查框架 | `claims[]`（Layer2 仍 unverified 的公开事实主张） | `web_status=pending/verified` + 升级 `accuracy/evidence/confidence` | 可插拔检索后端；无 `ALBEDO_SEARCH_API_KEY` → 诚实降级标 `pending`（待联网核查），不臆断；配 key + backend 后接真搜索升级判定 | L3(#128) |
 | TT1 | 验真·Layer0.5 防瞎编 | `claim_verifications` + `subtitle_lines` | 丢弃无原文支撑的断言（faithfulness=ungrounded） | 每条抽取断言 vs 字幕原文 NLI，LLM 瞎编的（视频没有的）直接丢弃，防污染（V3 遗漏3） | TT1(#84) |
 | TT2 | 验真·话术识别 | `claim_verifications` + `clean_text` | `red_flags` / `weasel_flag` / `hedge_level`（就地写） | 规则不联网：绝对化骗局话术 + 水词 + 模糊语；中文数字归一（"十万"→"10万"） | TT2(#84) |
 | TT3 | 验真·自相矛盾 | `claim_verifications` | `contradicts_with` + `accuracy=contradicted` + 矛盾对列表 | 两两 NLI，逻辑必然不实的矛盾对标红 + 证据溯源（纯本地） | TT3(#84) |
@@ -131,6 +144,7 @@ flowchart TD
 | 验真 TT0–TT6 `core/truth_track.py` + 数据模型 `core/models.py` + 接入/报告 `flows/refine.py`/`core/report.py` | TT0→TT6 / A5c / A4c | v0.3.0 |
 | 形式线 FT0–FT7 + G1/G2 `core/form_track.py` + 数据模型 `core/models.py` + 接入/报告 `flows/refine.py`/`core/report.py` | FT0→FT7 / G1 / G2 / A5d / A4d | v0.4.0 |
 | §6.2 判定 JUDGE + TT6 MiniCheck 真实路径 `core/judgment.py` + `core/minicheck_verify.py` + 接入 `flows/refine.py`/`core/truth_track.py` | TT5(真实路径) / JUDGE / A5c | v0.4.1 |
+| 抽主张重建 CE0–CE4 + Layer3 `core/salience.py` + `core/claim_cache.py` + `core/web_verify.py` + `core/truth_track.py` + `core/llm.py` + `flows/refine.py` | CE0 / CE1+CE2 / CE3 / CE4 / L3 / A5e | v0.4.3 |
 
 ---
 

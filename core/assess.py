@@ -245,6 +245,9 @@ def check_numeric_consistency(text: str) -> NumericCheck:
     """
     if not text:
         return NumericCheck(summary="（空内容，无数值可校验）")
+    # 剥离字幕时间戳 [mm:ss] / [mm:ss.xx]，避免把时间戳分钟数当成数值断言
+    # （如 "[02:08]" 的 02 被 income 正则误判为收入）——竞品 vergex 同思路（解析前剥离时间戳）
+    text = re.sub(r"\[\d{1,2}:\d{2}(?::\d{2})?\]", " ", text)
     text = _normalize_chinese_numerals(text)
 
     flags: list = []

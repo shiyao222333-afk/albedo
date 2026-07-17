@@ -1,21 +1,24 @@
-"""Albedo (Lian Zhen) · Layer2 联网深验（MiniCheck 本地部署，TT6 实质）
+"""Albedo (Lian Zhen) · Layer2 联网深验（本地 NLI 模型，TT6 实质）
 ========================================================================
 
-用 MiniCheck（McGill-NLP，EMNLP2024）对"可证伪事实断言"逐条核验：
-  claim + 同视频其他断言作证据语料 → supported / contradicted / neutral。
+⚠️ MiniCheck 路线已弃用（沙箱部署从未真跑通 + 中文能力弱）。
+现用 **mDeBERTa-XNLI**（MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7，
+多语言 NLI，含中文，base~300M，本地确定性、不飘）做逐条验真。
 
-MiniCheck-Flan-T5-Large(7.7亿) 达 GPT-4 级(74.7% vs 75.3%)，本地确定性、不飘，
-比自由 LLM 判真假稳得多（研究佐证见 docs/RESEARCH-TRUTH-METHODS-AUDIT）。
+为什么换（2026-07-17 用户拍板）：
+  - 不需要 nltk punkt（MiniCheck 的中文分句词典沙箱缺失导致静默降级 suspect）
+  - 模型小（~330M）、下载快、遗留代码 nli_detector.py 已用过同款
+  - 多语言含中文，对本机中文视频字幕友好
 
-部署（用户本机，需联网一次）：
-    pip install minicheck
-    # 首次运行会自动下载 flan-t5-large 权重（~3GB，走 HuggingFace）
-沙箱安装已验证可行（经 hf-mirror.com 镜像 + 本地源码安装 MiniCheck + 下载权重）；
-此模块用 try/except 守卫——包未安装时 `available=False`，verify_claims_web 自动降级标 unverified（不臆断）。
-权重缓存目录可用环境变量 MINICHECK_CACHE 指定（沙箱已下到 E:/tmp/minicheck_ckpts）。
+NLI 三分类映射：
+  premise = 视频字幕原文（证据语料）；hypothesis = 单条主张
+  entailment(被字幕支持)   -> accuracy="supported"
+  contradiction(被字幕反驳) -> accuracy="contradicted"
+  neutral(字幕无相关信息)   -> accuracy="unverified"（证据不足，保守不臆断）
 
-设计：仅对 check_worthy 且 scope=public 且 factuality=factual 的断言逐条核验；
-已判 contradicted（Layer1b 自相矛盾）的跳过，保矛盾结论。
+部署（本机一次）：权重下到 LAYER2_MODEL_DIR（默认 E:/tmp/mdeberta_xnli）。
+此模块用 try/except 守卫——模型未下载时 available=False，verify_claims 自动降级标 unverified。
+文件名暂沿用 minicheck_verify.py 以减少 import 改动；语义已切换，后续统一重命名为 layer2_verify.py。
 """
 from __future__ import annotations
 
@@ -23,60 +26,58 @@ import logging
 import os
 from typing import Optional
 
-logger = logging.getLogger("albedo.minicheck")
+import torch
+import torch.nn.functional as F
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-MINICHECK_MODEL = "flan-t5-large"  # 7.7亿参数，GPU/CPU 均可；RTX3080 跑得更顺
+logger = logging.getLogger("albedo.layer2")
 
-_available: Optional[bool] = None
-_scorer = None
+MODEL_NAME = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
+LOCAL_DIR = os.environ.get("LAYER2_MODEL_DIR") or "E:/tmp/mdeberta_xnli"
+CACHE_DIR = os.environ.get("LAYER2_CACHE_DIR") or "E:/tmp/mdeberta_cache"
+
+_tokenizer = None
+_model = None
 
 
 def is_available() -> bool:
-    """MiniCheck 包是否可用（懒检测）。"""
-    global _available
-    if _available is None:
-        try:
-            import minicheck  # noqa: F401
-            _available = True
-        except Exception as e:
-            _available = False
-            logger.warning("MiniCheck 未安装，Layer2 降级为 unverified：%s", e)
-    return _available
+    """transformers/torch 是否可用（懒检测）。"""
+    try:
+        import transformers  # noqa: F401
+        return True
+    except Exception as e:
+        logger.warning("transformers 未安装，Layer2 降级为 unverified：%s", e)
+        return False
 
 
-def _get_scorer():
-    """懒加载 MiniCheck scorer（只加载一次）。"""
-    global _scorer
-    if _scorer is not None:
-        return _scorer
+def _load():
+    """懒加载 mDeBERTa-XNLI（只加载一次，local_files_only 不联网）。"""
+    global _tokenizer, _model
+    if _model is not None:
+        return _model
     if not is_available():
         return None
     try:
-        from minicheck.minicheck import MiniCheck
-        cache_dir = os.environ.get("MINICHECK_CACHE") or None
-        if cache_dir:
-            _scorer = MiniCheck(model_name=MINICHECK_MODEL, cache_dir=cache_dir)
-        else:
-            _scorer = MiniCheck(model_name=MINICHECK_MODEL)
-        logger.info("MiniCheck scorer 已加载（%s, cache=%s）", MINICHECK_MODEL, cache_dir)
+        _tokenizer = AutoTokenizer.from_pretrained(LOCAL_DIR, cache_dir=CACHE_DIR, local_files_only=True)
+        _model = AutoModelForSequenceClassification.from_pretrained(LOCAL_DIR, cache_dir=CACHE_DIR, local_files_only=True)
+        if torch.cuda.is_available():
+            _model = _model.cuda()
+        _model.eval()
+        logger.info("Layer2 mDeBERTa-XNLI 已加载（local=%s, gpu=%s）", LOCAL_DIR, torch.cuda.is_available())
     except Exception as e:
-        logger.warning("MiniCheck scorer 加载失败：%s", e)
-        _scorer = False  # 标记加载失败，避免反复尝试
-    return _scorer if _scorer else None
+        logger.warning("Layer2 模型加载失败（权重未下全？）：%s", e)
+        _model = False
+    return _model if _model else None
 
 
 def verify_claims(claims: list, corpus: list = None, max_claims: int = 40) -> bool:
-    """对逐条断言就地写 accuracy / confidence / evidence_grade。
+    """对逐条断言就地写 accuracy / confidence / evidence_grade / epistemic_status / reasoning。
 
-    Args:
-        claims: truth_track 产出的 ClaimVerification 列表（dict，就地修改）。
-        corpus: 证据语料（视频字幕原文 list[str]），作为 MiniCheck 的 docs；
-                不传则退化为用其他断言的 quote（可能自指，真实路径应传字幕）。
-    Returns:
-        是否实际跑了 MiniCheck（True=已核验；False=降级）。
+    与旧 MiniCheck 版接口完全一致：claims 为 ClaimVerification 列表（就地修改），
+    corpus 为字幕原文 list[str]。返回是否实际跑了模型（False=降级 unverified）。
     """
-    scorer = _get_scorer()
-    if scorer is None:
+    model = _load()
+    if model is None:
         return False
 
     targets = [
@@ -89,36 +90,50 @@ def verify_claims(claims: list, corpus: list = None, max_claims: int = 40) -> bo
         return False
 
     # 证据语料：优先用视频字幕原文（避免用断言自身当证据导致自指误判）
-    if corpus and isinstance(corpus, list) and any(
-            isinstance(x, str) and x.strip() for x in corpus):
+    if corpus and isinstance(corpus, list) and any(isinstance(x, str) and x.strip() for x in corpus):
         evidence = [str(x).strip() for x in corpus if str(x).strip()]
     else:
         evidence = [c.get("quote", "") for c in (claims or []) if c.get("quote")]
-    # MiniCheck 需要非空 evidence corpus
     if not evidence:
         return False
 
+    premise = "\n".join(evidence)
+    id2label = model.config.id2label
+    labels = [id2label[i] for i in range(len(id2label))]
     try:
-        claims_text = [c.get("quote", "") for c in targets][:max_claims]
-        # MiniCheck.score(docs=evidence_corpus, claims=to_check) -> (pred_labels, support_probs, used_chunks, per_chunk_probs)
-        # pred_labels: 0=unsupported(无证据支持), 1=supported(有证据支持) —— 二分类
-        out = scorer.score(docs=evidence, claims=claims_text)
-        preds = out[0] if isinstance(out, (list, tuple)) else []
-        probs = out[1] if len(out) > 1 else [0.0] * len(preds)
-        for claim, pred, prob in zip(targets[:max_claims], preds, probs):
-            if pred == 1:
-                claim["accuracy"] = "supported"
-                claim["confidence"] = round(float(prob), 4)
-            else:  # unsupported：可能是 contradicted 或 neutral，MiniCheck 不区分，保守标 unverified
-                claim["accuracy"] = "unverified"
-                claim["confidence"] = 0.0
-            claim["evidence_grade"] = "L4"
-            claim["epistemic_status"] = claim["accuracy"]
-            verdict = "supported(有证据支持)" if pred == 1 else "unsupported(无证据支持)"
-            claim["reasoning"] = f"MiniCheck({MINICHECK_MODEL}) 判定：{verdict} (P={float(prob):.2f})"
+        ent_i, con_i, neu_i = labels.index("entailment"), labels.index("contradiction"), labels.index("neutral")
+    except ValueError:
+        logger.warning("模型标签非标准 NLI，降级：%s", labels)
+        return False
+
+    try:
+        for c in targets[:max_claims]:
+            hyp = c.get("quote", "")
+            if not hyp:
+                continue
+            inputs = _tokenizer(premise, hyp, return_tensors="pt", truncation=True, max_length=512)
+            if torch.cuda.is_available():
+                inputs = {k: v.cuda() for k, v in inputs.items()}
+            with torch.no_grad():
+                logits = model(**inputs).logits
+                probs = F.softmax(logits, dim=-1)[0]
+            p_ent, p_con, p_neu = float(probs[ent_i]), float(probs[con_i]), float(probs[neu_i])
+            if p_con >= p_ent and p_con >= p_neu:
+                c["accuracy"] = "contradicted"
+                c["confidence"] = round(p_con, 4)
+            elif p_ent >= p_neu:
+                c["accuracy"] = "supported"
+                c["confidence"] = round(p_ent, 4)
+            else:
+                c["accuracy"] = "unverified"
+                c["confidence"] = round(max(p_neu, p_ent), 4)
+            c["evidence_grade"] = "L4"
+            c["epistemic_status"] = c["accuracy"]
+            c["reasoning"] = (f"mDeBERTa-XNLI 判定：entail={p_ent:.2f} "
+                              f"contra={p_con:.2f} neutral={p_neu:.2f}")
         return True
     except Exception as e:
-        logger.warning("MiniCheck 推理失败，降级 unverified：%s", e)
+        logger.warning("Layer2 推理失败，降级 unverified：%s", e)
         for c in targets:
             if c.get("accuracy") != "contradicted":
                 c["accuracy"] = "unverified"

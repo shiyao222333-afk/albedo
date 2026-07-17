@@ -2,6 +2,75 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
 
+## [0.4.6.1] - 2026-07-17
+
+> 补漏：v0.4.6 缓存只冻了「主张集」，没冻「形式线(form_track)」。鲁棒性测试发现 trust_score 仍微抖 [0.6, 0.6, 0.51]——根因 `persuasion_polish`（形式线 G1，LLM 产出，5 个 LLM 调用）每次重算有方差，缓存命中时仍重跑 `_run_form_track` 并喂给 aggregate。本版把 form_track 也冻进缓存。
+
+### Fixed
+- **CE4 缓存冻结形式线（信任分微抖根治）** `core/claim_cache.py` + `core/truth_track._run_truth_track` + `flows/refine.py`：`save_claim_cache` 现同时存 `form_track`（含 `persuasion_polish`）；`refine` 在缓存命中时跳过 `_run_form_track` 直接复用冻结的 form_track → `aggregate` / `judge_document` 拿到的 polish 完全确定性，trust_score 复查不再微抖。旧「仅主张 list」缓存格式兼容（load 自动升级为 `{claims, form_track}`）。
+- 单测：同步 `test_claim_stability.test_ce4_cache` 与 `test_pipeline_smoke.test_cache_hit` 到新缓存结构（dict 返回值 / 冻结后 web_status 复用）。
+
+## [0.4.6] - 2026-07-16
+
+> 修 CE0 形式信号骨架「前倾偏差」（静默偏盲，不崩溃）。实测 20.6 分钟视频 Top-12 骨架原全堆在片头(00:00–00:08)+片尾，中后段 75% 时长仅 1 句 → CE1+CE2 抽主张结构性漏抽中部关键主张。用户拍板：要修。
+
+### Fixed
+- **CE0 时间桶覆盖** `core/salience.build_skeleton`：视频均分 `top_k` 个时间桶，每桶取显著度最高的句子 → 骨架强制横跨整段视频；空桶（静默段）从全局剩余显著度 Top 补足，保证返回 `top_k` 条且尽量时间均匀。实测修复后骨架 start 分布 `[5,145,244,321,414,564,714,801,864,1024,1082,1140]`s，中段(12s~结束前12s)占 11/12。位置/钩子权重不变（仅改覆盖策略，最小爆炸半径）。
+- `tests/test_claim_stability.test_ce0_skeleton`：断言从「显著度降序」改为「按时间升序 + 横跨视频(跨度≥40s) + 标注 bucket」，跟新行为对齐。
+
+### Audit 修复（同轮审计发现的「静默不符合预期」问题）
+- **CE3 忠实性自检改为「标记不删」** `core/truth_track.faithfulness_check`：原逻辑未命中子串直接硬删，与抽主张提示词允许「微调措辞」矛盾（忠实改写主张被误删，假阴性）。现仅标记 `faithfulness=grounded/ungrounded`，最终去留交 Layer0.5 guard 的 LLM NLI 裁决（#142）。
+- **guard 防瞎编回退 CE3 判定** `core/truth_track.guard_claim_faithfulness`：原缺失 claim 默认 `supported=True` 放行（长视频截断后幻觉被静默放过）。现 guard 未覆盖的 claim 回退到 CE3 确定性子串判定（`sup = (faithfulness=="grounded")`），LLM NLI 为权威裁决——既不默认放水也不误杀（#143）。
+- **aggregate 信任分反转修复** `core/truth_track.aggregate`：原 `personal/opinion=0.55 > factual+public=0.5` 与「可证伪公开事实更可信」语义相反。改为无可证伪公开事实→0.5，有→0.6（上限 0.6）（#145）。
+- **llm 截断直走续写游标（S1）** `core/llm.py`：新增 `TruncatedResponseError`；`call_llm` 在 `finish_reason=='length'` 抛出，`call_llm_json` 对其直接 re-raise，交由 `_extract_one_page` 走续写游标——不再浪费 3 次整页重试才放弃（省 key + 降丢页率）。
+- **CE4 缓存升级冻结最终主张集（#141 跨调用漂移根治）** `core/truth_track._run_truth_track` + `core/claim_cache.py`：`save_claim_cache` 从 CE3 后移到 guard + Layer1~3 全部完成后，缓存命中时跳过抽取/guard/各层、直接复用最终主张集 → 复查完全确定性复现，根治「同视频三次不一样」。测试脚本 `run_robustness_test.load_input` 在 JSON 缺 `video_id` 时从文件名推导 BV 号，确保缓存生效。
+- **删除重复行** `core/truth_track.extract_claims_self_consistent`：`n = max(1, n_samples)` 误写两遍，删一行（#146）。
+- 单测：`test_ce3_faithfulness` 断言同步（CE3 不再硬删）；新增 `test_guard_fallback_to_ce3` / `test_guard_fallback_keeps_ce3_grounded` 锁定 guard 回退行为。
+
+### Audit 关联（详见任务清单）
+- v0.4.5 频率门槛只在单次 refine() 调用的 n=3 抽样内去噪，压不住跨调用方差。**v0.4.6 用 CE4 缓存冻结最终主张集根治跨调用漂移**（默认带缓存重跑即收敛；`--no-cache` 下 3 次独立重抽仍漂移属预期，非 B 的 bug）。3× 鲁棒性测试 run1=3条/存疑、run2=5条/真实 的翻转已通过缓存消除。
+- 审计发现的 CE3 硬删×提示词矛盾、guard 默认放行、信任分反转、截断浪费重试、重复行等「静默不符合预期」问题均已在本版本修复（#142–#146、S1）。
+
+## [0.4.5] - 2026-07-16
+
+> LLM 调用韧性层（治「空响应 + 截断 + 漂移」，与 A 方案互补）。A 方案（分页 5/页 + 公式预算封顶）已治「长输出触顶」，本层治 DeepSeek 偶发的空 content、json_object 提前停止截断、以及全并集导致的三轮主张漂移（2/4/5）。依据 `docs/DESIGN-RESILIENT-LLM-2026-07-16.md`。用户拍板：**B 用「组合」阈值（频率门槛 + 高置信/高风险豁免）+ 新开本版本号**。
+
+### Added
+- **对策1 空响应检测 + 重试** `core/llm.py`：新增 `EmptyResponseError`；`call_llm` 返回前检查 content 非空（DeepSeek 服务压力下 HTTP200+空 content 视为瞬时故障，不再把空串当正常结果）；`call_llm_json` 加 `max_retries=3` + 指数退避（1s/2s），空响应/解析失败自动重试。所有调用方（形式线 FT1~FT5 / 验真线防瞎编 / 矛盾检测 / 抽主张）自动获得韧性。
+- **对策2 续写游标（治截断）** `core/truth_track._extract_one_page`：JSON 不完整时用 `json.JSONDecoder.raw_decode` 提取已完成的完整 claim 对象（`_recover_complete_claims`），再让模型从最后 `claim_id` 续写剩余主张（`_resume_page`，同预算、不重跑整页）；**绝不抬高 max_tokens 上限**（"Raising max_tokens blindly just moves the cliff"）。
+- **对策3 组合频率门槛并集（B）** `core/truth_track.extract_claims_self_consistent`：收集每轮每页「主张出现」，按频率过滤——N=3 时普通主张需 ≥2 次出现才进最终集（一次性幻觉/随机丢失直接滤掉）；**组合豁免**：命中绝对化骗局话术(`red_flags`) 或 可证伪+公开+值得查(`factual`/`public`/`check_worthy`) 的高风险/高置信主张即使仅 1 次也保留。CE3 忠实性自检已先行滤掉字幕无依据的幻影主张，豁免不会放行编造。
+
+### Changed
+- `core/truth_track._extract_one_page`：正常路径改用 `call_llm_json`（含内部重试），仅截断恢复分支直调 `call_llm` 拿 raw。
+
+### Tests
+- `tests/test_claim_stability.py`：新增 `test_ce1_ce2_frequency_threshold`（验证一次性非豁免噪声被滤、豁免主张保留）；原并集测试改取 5 条骨架（1页/样本）消除 mock 欠配噪声。
+- 确定性单测 + 冒烟测试全 PASS（不烧 key）。
+
+### 待验证
+- 真实视频 3× 鲁棒性（烧 DeepSeek key）：目标主张数三轮收敛（不再 2/4/5）、真实性标签稳定 suspect、MiniCheck 本地真验。
+
+## [0.4.3] - 2026-07-16
+
+> 抽主张重建（稳定性兜底）。以「DeepSeek 不稳是前提不是 bug」为根基，用**确定性形式信号骨架约束 + 自一致性并集去重 + 缓存冻结**根治「同视频三次抽出的主张不一样」导致的结论漂移。D-S 判定层、MiniCheck 层、入库层**完全不动**（确定性，同输入必同输出）。
+
+### Added
+- **CE0 形式信号骨架** `core/salience.py`（新）：从字幕时间戳算 7 维显著度（`pos/dur/rep/rhet/punct/emo/hook`，预设权重和=1.0），复用 `form_track.apply_rhetoric_rules`（FT4 规则单一来源）+ 伪声学（语速/停顿/标点/字符频率中心度），产出 Top-K=12 候选关键原话（带 ts/原话/显著度/信号标签/命中话术/重叠窗口上下文）。**零 LLM、确定性、<1s**。
+- **CE1+CE2 自一致性抽主张** `core/truth_track.extract_claims_self_consistent()`：约束解码（`response_format=json_object`，`llm.py` 新增透传）+ 固定 CE0 骨架为「必须覆盖范围」+ N=3 抽样取**并集去重**（非投票，与 PROJECT_PLAN 禁用的最终判定投票不冲突）。重叠窗口上下文防跨句主张漏抽。
+- **CE3 确定性忠实性自检** `core/truth_track.faithfulness_check()`：每条主张 vs 字幕全文子串/模糊匹配（跨句子句拆分），标 `grounded` + 锚点 `anchor_ts`，`ungrounded`（幻影）直接丢弃。补最大科学漏洞 faithfulness gap，零 LLM。
+- **CE4 主张缓存** `core/claim_cache.py`（新）：`cache/{video_id}.claims.json` 抽完落盘，复查/出报告复用不重抽 → 从协议层冻结 claim_quotes 漂移。
+- **Layer3 联网核查框架** `core/web_verify.py`（新）：对 Layer2 仍 `unverified` 的公开事实主张做联网升级；无 `ALBEDO_SEARCH_API_KEY` → 诚实降级标 `web_status=pending`（待联网核查），可插拔 `backend` 接口待配 key 后接真搜索。
+- **A5e 编排接入**：`truth_track._run_truth_track()` 串 CE0→CE4 + Layer3；`refine.py` 透传 `video_id` 启用缓存。无骨架（无字幕）退化旧路径。
+
+### Changed
+- `core/llm.py`：`call_llm` / `call_llm_json` 新增 `response_format` 透传（API 结构化输出约束解码）。
+- `core/models.py`：`ClaimVerification` 新增 `anchor_ts`（CE3 锚点）/ `web_status`（Layer3 状态）字段，契约向后兼容。
+
+### 验收
+- 确定性单测 `tests/test_claim_stability.py`：CE0 Top-K 降序 / CE1+CE2 并集去重 / CE3 丢弃幻影 / CE4 缓存重载一致 → 全 PASS。
+- 链路冒烟 `tests/test_pipeline_smoke.py`：A5e 缓存命中直接载入 + 抽取并写缓存 + CE3 锚定 + Layer3 无 key 诚实降级 pending → 全 PASS。
+- 真实视频 3× 鲁棒性（烧 DeepSeek key）：**待用户供给字幕样本后跑**（B站对该视频字幕接口需登录，沙箱免登录取不到；`scripts/fetch_bilibili_subs.py` + `scripts/run_robustness_test.py` 已就绪）。
+
 ## [0.4.2] - 2026-07-16
 
 > MiniCheck 在沙箱环境**真部署完成**（v0.4.1 标注的「PyPI 被代理拦截无法安装」已突破）。Layer2 事实核验从「降级 unverified」变为「真实运行」。

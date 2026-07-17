@@ -42,7 +42,7 @@ from core.merit import analyze_merits
 from core.structure import analyze_structure
 from core.provenance import build_provenance
 from core.report import render_report
-from core.classify import classify_content_type
+from core.classify import classify_content
 from core.content_track import (
     extract_key_sentences,
     build_highlight_blocks,
@@ -51,6 +51,7 @@ from core.content_track import (
 from core.grounding import check_grounding
 from core.truth_track import _run_truth_track
 from core.form_track import _run_form_track
+from core.claim_cache import load_claim_cache  # CE4 缓存：复查复用冻结的 form_track（v0.4.6.1）
 from core.judgment import judge_document  # §6.2 证据链判定（取代 assess 自由 LLM label）
 
 
@@ -96,6 +97,7 @@ def refine(
     inp: AlbedoInput,
     *,
     llm_kwargs: Optional[dict] = None,
+    cache_enabled: bool = True,
 ) -> RefinedKnowledgeObject:
     """认知精炼主入口：净化 + 多维评估 + 摘要/优点/结构/溯源 + 报告组装。
 
@@ -157,11 +159,11 @@ def refine(
         grounding = ct["grounding"]
         # sop/outline 字段映射（旧报告路径兼容；内容线报告优先读 content_extract）
         if content_type == "tutorial" and isinstance(content_extract, dict):
-            sop = {k: v for k, v in content_extract.items() if k != "kind"}
+            sop = {k: v for k, v in content_extract.items() if k not in ("kind", "_meta")}
             structure_type = "sop"
             outline = {}
         elif content_type == "narrative" and isinstance(content_extract, dict):
-            outline = {k: v for k, v in content_extract.items() if k != "kind"}
+            outline = {k: v for k, v in content_extract.items() if k not in ("kind", "_meta")}
             structure_type = "narrative"
             sop = {}
         else:
@@ -182,11 +184,19 @@ def refine(
         sop = structure.get("sop") or {}
         outline = structure.get("outline") or {}
 
-    # ── 形式线（v0.4.0, Track B）：所有类型都跑，管"怎么讲的"（钩子/结构/节奏/人设/修辞/模板）──
-    ft = _run_form_track(
-        inp, subtitle_lines=inp.subtitle_lines, clean_text=clean_text,
-        key_sentences=key_sentences, content_type=content_type, llm_kwargs=llm_kwargs,
-    )
+    # ── 形式线（v0.4.0, Track B）：管"怎么讲的"（钩子/结构/节奏/人设/修辞/模板）──
+    # 缓存命中时跳过 _run_form_track，复用冻结的 form_track（含 persuasion_polish），
+    # 避免 LLM 形式线方差导致信任分(trust_score)在复查时微抖（v0.4.6.1 修复）。
+    _vid = getattr(inp, "video_id", "") or ""
+    _cache_blob = load_claim_cache(_vid) if (cache_enabled and _vid) else None
+    if isinstance(_cache_blob, dict) and _cache_blob.get("form_track") is not None:
+        ft = _cache_blob["form_track"]
+    else:
+        ft = _run_form_track(
+            inp, subtitle_lines=inp.subtitle_lines, clean_text=clean_text,
+            key_sentences=key_sentences, content_type=content_type, llm_kwargs=llm_kwargs,
+        )
+    ft = {k: v for k, v in ft.items() if k in FormTrack.__dataclass_fields__}
     form_track = FormTrack(**ft)
     form_score = ft.get("form_score", 0.0)
 
@@ -196,6 +206,9 @@ def refine(
         inp, key_sentences=key_sentences, subtitle_lines=inp.subtitle_lines,
         clean_text=clean_text, llm_kwargs=llm_kwargs,
         persuasion_polish=ft.get("persuasion_polish", 0.0),
+        video_id=getattr(inp, "video_id", "") or "",
+        cache_enabled=cache_enabled,
+        form_track=ft,
     )
     claim_verifications = tt["claims"]
     truth_track = tt["truth_track"]
@@ -212,6 +225,7 @@ def refine(
         truthfulness.score = int(verdict.confidence * 100)
         truthfulness.reasoning = verdict.reasoning
         truthfulness.evidence_grade = "L4" if verdict.layer2_active else "L1"
+        truthfulness.verification_level = verdict.verification_level
     except Exception:
         # 判定模块异常不阻断，回退 assess 的降级结果
         pass
@@ -270,9 +284,12 @@ def _run_content_track(inp: AlbedoInput, llm_kwargs: dict) -> dict:
 
     每步独立 try/except 降级（已在各子模块内），整体不抛。
     """
-    content_type = classify_content_type(
+    cls = classify_content(
         inp.title, inp.subtitle_lines, inp.ai_conclusion, llm_kwargs
     )
+    content_type = cls["structure"]
+    intent = cls["intent"]
+    monetization = cls["monetization"]
     ks = extract_key_sentences(
         inp.subtitle_lines, inp.title, inp.ai_conclusion, llm_kwargs
     )
@@ -285,12 +302,15 @@ def _run_content_track(inp: AlbedoInput, llm_kwargs: dict) -> dict:
     content_extract = extract_by_type(
         content_type, key_sentences, summary, highlight_blocks,
         inp.title, inp.ai_conclusion, llm_kwargs,
+        inp.subtitle_lines, intent=intent, monetization=monetization,
     )
     grounding = check_grounding(
         summary.get("bullets", []), inp.subtitle_lines, llm_kwargs
     )
     return {
         "content_type": content_type,
+        "intent": intent,
+        "monetization": monetization,
         "key_sentences": key_sentences,
         "summary": summary,
         "highlight_blocks": highlight_blocks,

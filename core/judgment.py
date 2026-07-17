@@ -58,6 +58,7 @@ class DocumentVerdict:
     belief_false: float
     uncertainty: float
     layer2_active: bool       # MiniCheck 是否实际跑过
+    verification_level: str   # AF1：'externally_verified'(已联网深验) | 'self_consistent'(仅视频自洽·待外部核实)
     n_claims: int
     n_contradicted: int
     n_supported: int
@@ -179,7 +180,8 @@ def judge_document(claims: list, persuasion_polish: float = 0.0) -> DocumentVerd
         return DocumentVerdict(
             truth_label="suspect", epistemic_status="unverified", confidence=0.0,
             belief_true=0.0, belief_false=0.0, uncertainty=1.0,
-            layer2_active=False, n_claims=0, n_contradicted=0, n_supported=0,
+            layer2_active=False, verification_level="self_consistent",
+            n_claims=0, n_contradicted=0, n_supported=0,
             reasoning="无断言可验（无字幕或纯观点），单源无法确认，标存疑。",
         )
 
@@ -206,13 +208,22 @@ def judge_document(claims: list, persuasion_polish: float = 0.0) -> DocumentVerd
 
     epistemic_status = {"true": "corroborated", "suspect": "unverified", "false": "rejected"}[truth_label]
     confidence = round(belief_true, 4)
+    # AF1：区分"来源自洽"与"外部已验证"。只有 Layer3 联网核查实际确认(web_status=verified)
+    # 才算 externally_verified；MiniCheck 本地字幕核验 / 仅主张自洽都只是 self_consistent
+    # （视频自洽一致，但待外部核实）。
+    externally_verified = any(c.get("web_status") == "verified" for c in claims)
+    verification_level = "externally_verified" if externally_verified else "self_consistent"
 
     reasoning = (
         f"逐条验真 {n} 条断言：{n_supported} 条获MiniCheck支持、{n_contradicted} 条被证伪"
         f"（自相矛盾/MiniCheck判伪）；文档级证据融合 belief_true={belief_true:.2f} "
         f"belief_false={belief_false:.2f} uncertainty={uncertainty:.2f}。"
         + (f"冲突K={total_conflict:.2f}。" if total_conflict > 0 else "")
-        + f"结论={truth_label}（{'已部署MiniCheck' if layer2_active else 'MiniCheck未部署，单源存疑'}）"
+        + f"结论={truth_label}（"
+        + ("已联网核查确认(externally_verified)" if externally_verified
+           else ("MiniCheck本地字幕核验·待联网外部核查" if layer2_active
+                 else "MiniCheck未部署·仅视频自洽一致·待外部核实"))
+        + "）"
         + (f"；G1反向桥：高包装(polish={persuasion_polish:.2f})未验证→不轻信真"
            if truth_label == "suspect" and persuasion_polish >= 0.7 else "")
     )
@@ -225,6 +236,7 @@ def judge_document(claims: list, persuasion_polish: float = 0.0) -> DocumentVerd
         belief_false=round(belief_false, 4),
         uncertainty=round(uncertainty, 4),
         layer2_active=layer2_active,
+        verification_level=verification_level,
         n_claims=n,
         n_contradicted=n_contradicted,
         n_supported=n_supported,
