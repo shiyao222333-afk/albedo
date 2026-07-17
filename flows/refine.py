@@ -146,10 +146,16 @@ def refine(
     content_extract = {}
     highlight_blocks = []
     grounding = {}
+    ct = None  # 内容线结果（B 任务：进缓存复用）
+    # ── 提前加载缓存（B 任务：内容萃取也进缓存复用，须早于内容线）──
+    _vid = getattr(inp, "video_id", "") or ""
+    _cache_blob = load_claim_cache(_vid) if (cache_enabled and _vid) else None
+    _cached_ct = _cache_blob.get("content_track") if isinstance(_cache_blob, dict) else None
     use_content_track = (inp.text_type == "subtitle" and bool(inp.subtitle_lines))
     if use_content_track:
         # 字幕输入 → 内容线：分类 / 关键句+摘要 / 高光块 / 按类型萃取 / 保真自检
-        ct = _run_content_track(inp, llm_kwargs)
+        # 缓存命中复用冻结的内容萃取结果，根治干货度/摘要/关键原话轮间漂移（B 任务 #161）
+        ct = _cached_ct if _cached_ct else _run_content_track(inp, llm_kwargs)
         summary = ct["summary"]
         merits = {}  # 内容线不单独产 merits，优点已融入各类型萃取
         content_type = ct["content_type"]
@@ -187,8 +193,6 @@ def refine(
     # ── 形式线（v0.4.0, Track B）：管"怎么讲的"（钩子/结构/节奏/人设/修辞/模板）──
     # 缓存命中时跳过 _run_form_track，复用冻结的 form_track（含 persuasion_polish），
     # 避免 LLM 形式线方差导致信任分(trust_score)在复查时微抖（v0.4.6.1 修复）。
-    _vid = getattr(inp, "video_id", "") or ""
-    _cache_blob = load_claim_cache(_vid) if (cache_enabled and _vid) else None
     if isinstance(_cache_blob, dict) and _cache_blob.get("form_track") is not None:
         ft = _cache_blob["form_track"]
     else:
@@ -206,9 +210,10 @@ def refine(
         inp, key_sentences=key_sentences, subtitle_lines=inp.subtitle_lines,
         clean_text=clean_text, llm_kwargs=llm_kwargs,
         persuasion_polish=ft.get("persuasion_polish", 0.0),
-        video_id=getattr(inp, "video_id", "") or "",
+        video_id=_vid,
         cache_enabled=cache_enabled,
         form_track=ft,
+        content_track=ct,
     )
     claim_verifications = tt["claims"]
     truth_track = tt["truth_track"]

@@ -61,12 +61,14 @@ def load_claim_cache(video_id: str, verify_sig: str = ""):
             # 旧格式无 sig → 失效重算（安全优先）
             return None
         data.setdefault("form_track", None)
+        data.setdefault("content_track", None)
+        data.setdefault("dropped_audit", [])
         return data
     return None
 
 
-def save_claim_cache(video_id: str, claims: list, form_track=None, verify_sig: str = "") -> bool:
-    """冻结「最终主张集 + 形式线(form_track) + 验真配置指纹 verify_sig」。
+def save_claim_cache(video_id: str, claims: list, form_track=None, content_track=None, verify_sig: str = "", dropped_audit=None) -> bool:
+    """冻结「最终主张集 + 形式线(form_track) + 内容线(content_track) + 验真配置指纹 verify_sig」。
 
     成功 True，失败 False（不阻断主流程）。
 
@@ -74,13 +76,21 @@ def save_claim_cache(video_id: str, claims: list, form_track=None, verify_sig: s
     否则冻结的是验真前主张（accuracy 空），命中缓存会丢真结论。
     form_track 含 persuasion_polish（G1 反向桥）等 LLM 产出；冻结后复查跳过 _run_form_track，
     信任分聚合不再受 LLM 方差影响（v0.4.6.1 修复 trust_score 微抖）。
+    content_track（v0.4.9 新增）：冻结内容萃取结果（摘要/关键原话/按类型萃取/高光块/保真），
+    复查跳过 _run_content_track，根治干货度/摘要/关键原话轮间漂移（#161 B 任务）。
     """
     if not video_id:
         return False
     try:
         p = cache_path(video_id)
         p.write_text(json.dumps(
-            {"claims": claims, "form_track": form_track, "verify_sig": verify_sig},
+            {
+                "claims": claims,
+                "form_track": form_track,
+                "content_track": content_track,
+                "verify_sig": verify_sig,
+                "dropped_audit": dropped_audit or [],
+            },
             ensure_ascii=False, indent=2,
         ), encoding="utf-8")
         return True

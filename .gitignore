@@ -4,3 +4,6 @@ __pycache__/
 .watcher.pid
 data/out/*.json
 data/out/*.md
+data/out/*.log
+data/out/_baseline_*/
+cache/

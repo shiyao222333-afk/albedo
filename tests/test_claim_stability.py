@@ -163,13 +163,32 @@ def test_ce4_cache():
         {"claim_id": "c0", "quote": "q1", "ts": "00:20", "faithfulness": "grounded", "anchor_ts": "00:20"},
         {"claim_id": "c1", "quote": "q2", "ts": "00:30", "faithfulness": "grounded", "anchor_ts": "00:30"},
     ]
-    assert save_claim_cache(vid, claims)
-    loaded = load_claim_cache(vid)
-    assert loaded is not None
+    # v0.4.7 起缓存需带 verify_sig 才命中（版本化失效：无 sig = 过期）
+    sig = "test_sig_v049"
+    assert save_claim_cache(vid, claims, verify_sig=sig)
+    loaded = load_claim_cache(vid, verify_sig=sig)
+    assert loaded is not None, "带 sig 的缓存应命中"
     assert [c["quote"] for c in loaded["claims"]] == [c["quote"] for c in claims], "缓存重载应一致"
+    # 版本化失效：sig 不符视为未命中（旧缓存不掩盖新模型/逻辑）
+    assert load_claim_cache(vid, verify_sig="different_sig") is None, "sig 不符应失效"
     print(f"[CE4] OK cache identical, n={len(loaded['claims'])}")
     if p.exists():
         p.unlink()
+
+
+def test_norm_quote_dedup_context_prefix():
+    """v0.4.9 回归：LLM 把骨架「上下文：…」装饰原样带回 quote 时，同源变体须正确归一化。
+
+    复现 RUN1 真实重复：三条变体修复前应得三个不同 key（漏去重）；
+    修复后①+②合并同键、③剥掉「上下文：…」装饰块。
+    """
+    a = "一家店铺 / 短短一个月的下单人数"
+    b = "一家店铺 短短一个月的下单人数"
+    c = "一家店铺  「上下文：直接就卖到上千甚至上万 / 一家店铺 / 短短一个月的下单人数」"
+    ka, kb, kc = tt._norm_quote(a), tt._norm_quote(b), tt._norm_quote(c)
+    assert ka == kb, f"纯文本/分隔符变体应同键，实得 {ka!r} vs {kb!r}"
+    assert "上下文" not in kc, f"上下文装饰应被剥除，实得 {kc!r}"
+    print(f"[norm] OK 去重键 a==b={ka!r}, c={kc!r}")
 
 
 if __name__ == "__main__":
@@ -180,4 +199,5 @@ if __name__ == "__main__":
     test_guard_fallback_to_ce3()
     test_guard_fallback_keeps_ce3_grounded()
     test_ce4_cache()
+    test_norm_quote_dedup_context_prefix()
     print("\nALL TESTS PASSED")

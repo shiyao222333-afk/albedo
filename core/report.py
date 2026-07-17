@@ -200,6 +200,7 @@ def _render_verdict_card(out: dict) -> str:
         "",
         f"- **真实性结论**：{label_disp}" + (f"（自洽置信 {score_txt}/100）" if score_txt else ""),
         f"- **证据分级**：{grade}",
+        f"- **深度验真（Layer2）**：{('已启用（L4 mDeBERTa-XNLI 本地字幕核验）' if raw_grade == 'L4' else '未启用（L1，仅不联网快筛——结论为「未验真」默认值，不代表真实或虚假）')}",
         f"- **入库状态**：{status}",
         # AF2：三轴用统一的 0-1 自洽置信（来自验真融合），不再与 FPF 信任分混用"可信度"标签
         f"- **三轴总览**：干货度 {content_axis} ｜ 自洽置信 {self_conf:.2f} ｜ 表达力 {form_txt}",
@@ -690,6 +691,26 @@ def _render_truth_track(o: dict) -> str:
                 f"- 断言 {cx.get('claim_id')}（{cx.get('ts', '')}） ⇄ "
                 f"断言 {cx.get('with_claim_id')}（{cx.get('with_ts', '')}）"
             )
+
+    # ── 被过滤主张审计（v0.4.9 F 任务）：硬删过滤器留痕，误杀可追溯 ──
+    dropped_audit = tt.get("dropped_audit") or []
+    if dropped_audit:
+        lines.append("")
+        lines.append("**🔍 被过滤主张（审计 · 如误杀请告诉我，我调阈值）：**")
+        _stage_cn = {
+            "AE1_water": "AE1 水词/过渡句",
+            "AE1_noncheckworthy": "AE1 非可证伪(观点/主观)",
+            "L0.5_ungrounded": "Layer0.5 防瞎编(字幕无依据)",
+        }
+        for d in dropped_audit:
+            _stage = _stage_cn.get(d.get("stage", ""), d.get("stage", ""))
+            _q = _str(d.get("quote"))
+            _ts = _str(d.get("ts"))
+            _r = _str(d.get("reason"))
+            _head = f"- [{_stage}] {_q}" if not _ts else f"- [{_stage}] [{_ts}] {_q}"
+            lines.append(_head)
+            if _r:
+                lines.append(f"  - 原因：{_r}")
     lines.append("")
     return "\n".join(lines)
 

@@ -2,6 +2,25 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
 
+## [0.4.9] - 2026-07-17
+
+> 内容线冻结（治轮间漂移）+ 验真健壮性增强 + 硬删留痕审计 + 馏析→炼真桥 + 去重修复。3× 鲁棒性测试在「带 torch 正确环境 + Layer2 启用」下验证：truth_label=true×3、status=accepted×3、trust=0.51×3，RESULT CHECK。
+
+### Added
+- **内容线冻结进缓存（B 任务·#161）** `core/claim_cache.py` + `flows/refine.py` + `core/truth_track._run_truth_track`：`save_claim_cache` 现同时冻 `content_track`（摘要/关键原话/按类型萃取/高光块/保真），缓存命中时跳过 `_run_content_track` → 根治干货度/摘要/关键原话轮间漂移。
+- **馏析→炼真 Whisper 桥** `scripts/_nigredo_transcribe_bridge.py`：只调 Nigredo 已发布函数、只写 Albedo 的 `data/out/`，守跨项目边界铁律（不改兄弟项目代码/目录）。
+- **硬删留痕审计（F 任务）** `core/truth_track`：硬删过滤器改「隔离不销毁」，每条被删主张进 `dropped_audit=[{quote,ts,stage,reason}]`，经 aggregate→claim_cache→`core/report`「🔍 被过滤主张（审计）」全链路贯通；新增 `tests/test_dropped_audit.py` 单测 + `docs/FILTER-AUDIT-2026-07-17.md` 交付文档。
+- **用户未来设想（路线图）** `PROJECT_PLAN.md` 第八节 + `BLUEPRINT.md` 两条：多平台入口 / 方法跨文件复用 / 与熔知矛盾检测（归类「跨来源矛盾检测」，用户已认可）/ 增强内容+形式分析以便学习模仿。
+
+### Changed
+- **主张 ts 取真实值（C 任务）** `core/truth_track` + `flows/refine`：主张时间戳回填字幕真实戳，不再用占位。
+- **AE1 强化水主张过滤（D 任务）** `core/truth_track`：水词/过渡句/定义碎片识别收紧，降误抽。
+- **验真缺失告警（E 任务）** `core/report` + `core/truth_track`：验真环节未启用/缺失时在报告显著告警；报告「深度验真（Layer2）」状态行显示启用级别。
+
+### Fixed
+- **CE2 去重未覆盖「上下文：」前缀变体（#170）** `core/truth_track._norm_quote`：LLM 有时把骨架「上下文：A / B / C」装饰原样带回 quote，导致同一主张的「纯文本版」与「带上下文前缀版」归一化后 key 不同、漏去重（RUN1 实测出现 3 份同源主张）。现先剥除「上下文：…」整块装饰（及裸露前缀），再统一去空白与骨架用的「/」分隔符，变体归并为同键；退化碎片「一家店铺」被 AE1 正确归为水词进审计区。新增 `test_claim_stability.test_norm_quote_dedup_context_prefix` 防回归。
+- **单测 CE4 适配 v0.4.7 版本化失效契约** `tests/test_claim_stability.test_ce4_cache`：v0.4.7 起缓存需带非空 `verify_sig` 才命中（无 sig=过期），原测试不带 sig → 静默失败；现带 sig 读写并断言 sig 不符即失效。
+
 ## [0.4.6.1] - 2026-07-17
 
 > 补漏：v0.4.6 缓存只冻了「主张集」，没冻「形式线(form_track)」。鲁棒性测试发现 trust_score 仍微抖 [0.6, 0.6, 0.51]——根因 `persuasion_polish`（形式线 G1，LLM 产出，5 个 LLM 调用）每次重算有方差，缓存命中时仍重跑 `_run_form_track` 并喂给 aggregate。本版把 form_track 也冻进缓存。
