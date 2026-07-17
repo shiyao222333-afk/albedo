@@ -21,6 +21,42 @@
 - **CE2 去重未覆盖「上下文：」前缀变体（#170）** `core/truth_track._norm_quote`：LLM 有时把骨架「上下文：A / B / C」装饰原样带回 quote，导致同一主张的「纯文本版」与「带上下文前缀版」归一化后 key 不同、漏去重（RUN1 实测出现 3 份同源主张）。现先剥除「上下文：…」整块装饰（及裸露前缀），再统一去空白与骨架用的「/」分隔符，变体归并为同键；退化碎片「一家店铺」被 AE1 正确归为水词进审计区。新增 `test_claim_stability.test_norm_quote_dedup_context_prefix` 防回归。
 - **单测 CE4 适配 v0.4.7 版本化失效契约** `tests/test_claim_stability.test_ce4_cache`：v0.4.7 起缓存需带非空 `verify_sig` 才命中（无 sig=过期），原测试不带 sig → 静默失败；现带 sig 读写并断言 sig 不符即失效。
 
+## [0.4.8] - 2026-07-17
+
+> 报告质量根治：先对第一份真实报告逐条溯源 11 个问题（含竞品 PolitiFact / FActScore / ClaimBuster 对标），再按「快修→中修→设计」落地。本轮同时揪出「不稳定/慢/丢页」真根因——DeepSeek v4-flash 模型错配（非代码脆弱）。
+
+### Added
+- **多轴分类（AC1）** `core/classify.py`：`classify_content() -> {structure, intent[], monetization}` 取代单标签；intent 可多选；揭秘卖课即使误判 tutorial 也强制走 opinion，根治"揭秘卖课被当教程→编造 SOP"（问题3）。
+- **混合模板路由 + 卖家声明（AC2/AC3）** `core/content_extract`：按 intent 显示"含卖货/揭秘曝光意图：仅供参照勿照搬"声明；干货度按锚定通过条目数计，卖课教程封顶 0.6 不高抬。
+- **通用锚定闸门（AC4/AC5）** `core/ground_extract.py`：`gate_extract`（子串命中字幕 blob + ts 端点真）+ `apply_sop_gate`（编造 SOP 步骤剔除）+ `apply_flag_gate`（主张/大纲无依据标⚠️保留）；SOP/大纲/主张全接闸门，无字幕→全部 grounded 不误杀。
+- **checkworthiness 过滤（AE1）** `core/truth_track`：验真前按 `_is_water_claim` + `check_worthy` 过滤水词/过渡句/碎片/非事实句，仅保留可证伪事实主张进 Layer0.5~2，省 LLM 预算不污染判定。
+- **标签语义重构（AF1/AF2）** `core/judgment.py` + `core/report.py`：新增 `verification_level`（externally_verified 仅当联网确认；本地字幕核验 = self_consistent「视频自洽·待外部核实」）；消除"真实98 vs 可信度0.6"两分打架，三轴统一 0-1。
+- **路线图·用户未来设想** `PROJECT_PLAN.md` 第八节 + `BLUEPRINT.md` 两条：多平台入口 / 方法跨文件复用 / 与熔知矛盾检测（归类「跨来源矛盾检测」）/ 增强内容+形式分析以便学习模仿。
+
+### Changed
+- **快修（AD）** `core/assess.py` 数值扫描前剥离 `[mm:ss]` 时间戳（修 income=02/03 误报）；`core/report.py` 包装强度条件化（≥0.7 高 / ≥0.4 中 / 否则低，不再写死"高包装"）；钩子/叙事段 ungrounded 打⚠️；关键原话截断升 `max_tokens=8192` 重试 + 高光块空改占位文案。
+
+### Fixed
+- **v4-flash 模型错配根因** `core/llm.py` + `.env`：DeepSeek v4-flash 是推理模型，固定小预算被推理 token 吃光 → `finish_reason=length` 空 content 反复重试触发丢页。修复：默认回 `deepseek-chat`（快/便宜/确定/零推理开销）；新增 `ALBEDO_LLM_MAX_TOKENS_OVERRIDE` 环境变量 + 测试 `--model`/`--max-tokens` 参数，未来可公平对照不改动代码。
+- **环境坑（随本轮一并修）** `core/llm.py` 手动解析 `.env`（沙箱装不了 python-dotenv 时 KB_LLM_API_KEY 不再静默空）；`scripts/run_robustness_test.py` nltk 可选导入 + 正则兜底。
+- **报告对比脚本崩溃** `scripts/run_robustness_test.py`：`KeyError:'claims'` 元数据结构对不上，顺手修。
+
+## [0.4.7] - 2026-07-17
+
+> 科学解法：缓存带版本指纹自动失效 + 保存顺序修正冻结「含真验真结论」的最终主张 + 验真模型换成中文友好的 mDeBERTa-XNLI（弃用 MiniCheck）。真实视频端到端跑通（mDeBERTa 真验真 → 真/0.6，推翻此前 MiniCheck 降级伪结论）。
+
+### Changed
+- **CE4 缓存带 `verify_sig` 版本指纹** `core/claim_cache.py`：`load_claim_cache(video_id, sig)` 指纹不符 / 缺 sig → 自动失效重算；换 Layer2 模型或改验真/判定逻辑不再需手动 `rm` 缓存（根治"旧缓存掩盖新模型"坑）。
+- **`save_claim_cache` 顺序修正** `core/truth_track._run_truth_track`：从 CE3 后移到 guard + Layer1~3 全部完成后，冻结的是「含真验真结论」的最终主张集，而非验真前快照 → 根治 RUN1=true / RUN2=suspect 翻盘。
+- **稳定性检查比对完整主张** `run_real_video.py` / `run_robustness_test.py`：从只比 quote 文本改为比 `quote+accuracy+confidence`，翻盘无处藏。
+
+### Changed (验真模型)
+- **Layer2 换 mDeBERTa-XNLI** `core/minicheck_verify.py` 重写为 MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7（多语言含中文、base~300M、确定性 NLI）；对外接口 `verify_claims(claims, corpus=字幕)` 不变，`truth_track.py` 零改动。MiniCheck 路线弃用（中文能力弱 + 沙箱权重从未真跑通）。详见 `docs/RESEARCH-TRUTH-MODELS-CN-2026-07-17.md`。
+
+### Added
+- **B 类大模型级联核查进路线图** `PROJECT_PLAN.md` 6.2：mDeBERTa≥0.8 直接采纳 / 难例升级 B 类大模型 + 联网 / 标注集生成器；待 #2 评测集建成后与 Layer3 同期演进。
+- **输出位置澄清**：生产 watcher 精炼报告写 `Citrinitas/library/inbox/`（交熔知中转②）；手动测试脚本写 `data/out/`。
+
 ## [0.4.6.1] - 2026-07-17
 
 > 补漏：v0.4.6 缓存只冻了「主张集」，没冻「形式线(form_track)」。鲁棒性测试发现 trust_score 仍微抖 [0.6, 0.6, 0.51]——根因 `persuasion_polish`（形式线 G1，LLM 产出，5 个 LLM 调用）每次重算有方差，缓存命中时仍重跑 `_run_form_track` 并喂给 aggregate。本版把 form_track 也冻进缓存。

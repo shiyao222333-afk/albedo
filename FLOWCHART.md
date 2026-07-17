@@ -15,23 +15,27 @@ flowchart TD
     C --> SUB{"字幕输入?<br/>带结构化字幕行"}
     SUB -->|"否（通用文案）"| A0["内容摘要 A0<br/>中性'讲什么'：gist / bullets / key_claims"]
     SUB -->|"是（字幕类）"| CT0["解析增强 C2b<br/>拆字幕/高光/弹幕/评论(带ts)"]
-    CT0 --> CT1["内容分类 CT1<br/>tutorial/tool_review/opinion/..."]
+    CT0 --> CT1["内容分类 CT1(多轴)<br/>结构/意图[]/变现方式"]
     CT1 --> CT2["关键句锚定 CT2<br/>抄原话(兜底)+改写摘要(带ts)"]
     CT2 --> CT3["高光块 CT3<br/>±15条字幕+邻近弹幕"]
     CT3 --> CT4["按类型萃取 CT4<br/>SOP/决策表/论点图/概念卡"]
     CT4 --> CT5["保真自检 CT5<br/>摘要是否被字幕支撑"]
     A0 --> FT["形式线 FT0-FT7<br/>钩子/叙事/节奏/人设/修辞/模板/情绪<br/>+ 说服包装强度(G1→验真)"]
-    CT5 --> FT
+    CT5 --> AC45["AC4/AC5 通用锚定闸门<br/>ground_extract: SOP编造剔除/主张标⚠️"]
+    AC45 --> FT
     FT --> CE0["CE0 形式信号骨架<br/>7维显著度加权(确定性,零LLM)"]
     CE0 --> TT0["TT0 抽原子断言<br/>自一致性 N=3(CE1+CE2)<br/>约束于CE0骨架"]
-    TT0 --> CE3["CE3 忠实性自检<br/>字幕子串/模糊匹配(确定性)<br/>ungrounded丢弃"]
-    CE3 --> CE4["CE4 主张缓存<br/>cache/{video_id}.claims.json<br/>(复查不重抽)"]
-    CE4 --> TT1["验真 TT1<br/>Layer0.5 防瞎编<br/>(断言vs字幕NLI,丢弃无支撑)"]
+    TT0 --> CE3["CE3 忠实性自检+ts回填<br/>字幕子串/模糊匹配(确定性)<br/>ungrounded丢弃·anchor_ts回填真实戳"]
+    CE3 --> AE1["AE1 checkworthiness 过滤<br/>水词/过渡句/碎片剔除(确定性)"]
+    AE1 --> CE4["CE4 主张缓存<br/>cache/{video_id}.claims.json<br/>(复查不重抽·带verify_sig版本指纹)"]
+    CE4 --> FAUDIT["F 硬删留痕审计<br/>dropped_audit: 被删主张全记录"]
+    FAUDIT -.->|"仅记录·不阻断"| R
+    FAUDIT --> TT1["验真 TT1<br/>Layer0.5 防瞎编<br/>(断言vs字幕NLI,丢弃无支撑)"]
     TT1 --> TT2["验真 TT2<br/>Layer1a 话术识别<br/>(绝对化/水词/模糊语)"]
     TT2 --> TT3["验真 TT3<br/>Layer1b 自相矛盾<br/>(两两NLI)"]
     TT3 --> TT4["验真 TT4<br/>Layer1c 时效标记<br/>(verified_date+validity_class)"]
-    TT4 --> TT5["验真 TT5<br/>Layer2 联网深验<br/>(MiniCheck本地,沙箱标unverified)"]
-    TT5 --> L3["Layer3 联网核查框架<br/>(无ALBEDO_SEARCH_API_KEY→pending<br/>诚实降级待联网核查)"]
+    TT4 --> TT5["验真 TT5<br/>Layer2 本地中文验真<br/>(mDeBERTa-XNLI确定性NLI)"]
+    TT5 -->|"Layer2 本地验真(mDeBERTa-XNLI逐条NLI)"| L3["Layer3 联网核查框架<br/>(无ALBEDO_SEARCH_API_KEY→pending<br/>诚实降级待联网核查)"]
     L3 --> JUDGE["判定 JUDGE<br/>§6.2 证据链(D-S融合)<br/>逐条证据→真/假/可疑(确定性)"]
     JUDGE --> D{"质量评估 C3 + 验真结论<br/>真 / 假 / 可疑(确定性)"}
     D -->|"虚假"| E["隔离 / 拒入库<br/>(status=rejected)"]
@@ -41,7 +45,7 @@ flowchart TD
     G --> H["结构化提炼 C5<br/>SOP / 大纲（A2）"]
     H --> I["溯源标记 C6<br/>video_id / up / 时间戳（A3）"]
     I --> J["精炼知识对象 C7<br/>RefinedKnowledgeObject"]
-    J --> R["鉴定报告渲染 A4<br/>单 Markdown 报告"]
+    J --> R["鉴定报告渲染 A4<br/>单 Markdown 报告<br/>+ 验真状态横幅(E)"]
     R --> FR["报告·形式章节 A4d<br/>🎬 形式分析 + 三轴总览"]
     FR --> AS["编排 A5<br/>A0→C3→A1→A2→A3→A4"]
     AS --> UI["界面 A6<br/>展示报告 + 导出 .md / .json"]
@@ -89,22 +93,26 @@ flowchart TD
 | A5 | 编排补全 | 各层输出 | `out.report` | try/except 包裹每步，失败→空 dict 续跑；顺序 A0→assess→A1→A2→A3→A4 | A5(#701) |
 | A6 | 界面扩展 | `out.report` | Streamlit 展示 + 导出 .md / .json | 移除 v0.1.0 内联拼接，改渲染 out.report | A6(#700) |
 | C2b | 中转解析增强 | Nigredo 中转① `.md`（YAML frontmatter + `#字幕(带ts)/#高光/#弹幕/#置顶/#高赞/#AI摘要`） | `AlbedoInput.subtitle_lines / highlights / danmaku / comments_pinned / comments_top / ai_conclusion` | 分节解析，旧格式降级不崩（字幕逐条 `[mm:ss] 文本` 来自 Nigredo 上游契约） | — |
-| CT1 | 内容分类 | `subtitle_lines` + `title` + `ai_conclusion` | `content_type`（tutorial/tool_review/knowledge/opinion/entertainment/narrative/unknown） | LLM temperature=0 + 固定枚举，失败降级 unknown（确定性） | — |
+| CT1 | 内容分类(多轴) | `subtitle_lines` + `title` + `ai_conclusion` | `content_type{structure, intent[], monetization}`（结构/意图可多选/变现方式） | LLM temperature=0 + 多轴枚举；intent 含"揭秘曝光/吐槽"即使误判 tutorial 也强制走 opinion（根治"揭秘卖课被当教程→编造SOP"）；失败降级 unknown（确定性） | AC1(#155) |
 | CT2 | 关键句锚定（Route A） | `subtitle_lines` | `key_sentences`（原话带ts兜底）+ `summary{gist, bullets[带source_ts]}` | 先抄关键原话（不丢），再改写生成摘要（措辞可变、内容一致、每条指回字幕） | — |
 | CT3 | 高光上下文块 | `highlights` + `subtitle_lines` + `danmaku` + 评论 | `highlight_blocks[{ts, subtitle_window±15条, danmaku, comments}]` | 纯函数；每条高光取前后 ±15 条字幕（时间轴锚定）+ 邻近弹幕 | — |
 | CT4 | 按类型萃取 | `content_type` + `key_sentences` + `summary` + `highlight_blocks` | `content_extract`（SOP/决策表/论点图/概念卡/大纲，每条带 ts） | 分流萃取；entertainment 标记转形式线 | — |
 | CT5 | 保真自检 | `summary.bullets` + `subtitle_lines` | `grounding{checked, ungrounded[]}` | 类 SummaC NLI 蕴含判定，无支撑句标「⚠️无原文支撑」（查编造非查真假） | — |
 | TT0 | 验真·抽断言 | `key_sentences`（或 clean_text 切句）+ `title` | `claim_verifications[]`（每条含 claim_id/quote/ts/factuality/scope/check_worthy/hedge/weasel） | LLM temperature=0 + 固定枚举抽原子断言，锚定真实原话（防瞎编从源头）；数据模型 `ClaimVerification` 在 `core/models.py` | TT0(#83) |
 | CE0 | 抽主张·形式信号骨架 | `subtitle_lines`（带 ts/start/end/text）+ `clean_text`（FT4 规则兜底）+ `danmaku`（FT6 弱代理） | `skeleton[]`（Top-K=12，每句带 ts/原话/显著度/7维信号标签/命中话术/重叠窗口上下文） | **确定性、零 LLM**：7 维显著度加权（pos/dur/rep/rhet/punct/emo/hook，预设权重和=1.0），复用 `form_track.apply_rhetoric_rules` + 伪声学（语速/停顿/标点/字符频率中心度）；治 DeepSeek 不稳的源头 | CE0(#123) |
-| CE1+CE2 | 抽主张·自一致性并集 | `skeleton` + `title` | `claims[]`（CE0 约束内抽 N=3 次，归一化去重并集，非投票） | 约束解码 `response_format=json_object` + 固定 CE0 骨架为"必须覆盖范围"；N=3 抽样取并集（某次抽风漏的别的次补上），重叠窗口防跨句主张漏抽 | CE1+CE2(#125) |
-| CE3 | 抽主张·忠实性自检 | `claims[]` + `subtitle_lines` | `kept[]`（grounded + anchor_ts）/ 丢弃 ungrounded | **确定性、零 LLM**：每条主张 vs 字幕全文子串/模糊匹配（跨句子句拆分），幻影丢弃（补 faithfulness gap） | CE3(#126) |
-| CE4 | 抽主张·缓存 | `video_id` + `claims[]`（CE3 通过后） | `cache/{video_id}.claims.json`（落盘） | 抽完落盘，复查/出报告复用不重抽 → 从协议层冻结 claim_quotes 漂移 | CE4(#127) |
+| CE1+CE2 | 抽主张·自一致性并集 | `skeleton` + `title` | `claims[]`（CE0 约束内抽 N=3 次，归一化去重并集，非投票） | 约束解码 `response_format=json_object` + 固定 CE0 骨架为"必须覆盖范围"；N=3 抽样取并集（某次抽风漏的别的次补上），重叠窗口防跨句主张漏抽；`_norm_quote` 归一化键剥「上下文：」前缀装饰 + 去 `/` 分隔符，覆盖 LLM 回声骨架装饰的同源变体去重（v0.4.9 #170） | CE1+CE2(#125) |
+| CE3 | 抽主张·忠实性自检+ts回填 | `claims[]` + `subtitle_lines` | `kept[]`（grounded + anchor_ts）/ 丢弃 ungrounded | **确定性、零 LLM**：每条主张 vs 字幕全文子串/模糊匹配（跨句子句拆分），幻影丢弃（补 faithfulness gap）；`faithfulness_check` 算 `anchor_ts` 回填入 `ts`+重算 `start`，主张时间戳取字幕真实戳（v0.4.9 #162 C） | CE3(#126) |
+| CE4 | 抽主张·缓存(带版本指纹) | `video_id` + `claims[]`（CE3 通过后） | `cache/{video_id}.claims.json`（落盘，含 `verify_sig` + `content_track`） | 抽完落盘，复查/出报告复用不重抽 → 从协议层冻结 claim_quotes 漂移；**v0.4.7 起带 `verify_sig`（Layer2模型名+验真/判定逻辑源码hash+LLM模型名），指纹不符/缺 sig 自动失效重算**，换模型/改逻辑不再需手动 rm 缓存；**v0.4.9 起同时冻 `content_track`（摘要/关键原话/萃取/高光/保真），命中跳过 `_run_content_track` 根治轮间漂移（#161 B）** | CE4(#127) |
+| AE1 | 验真·checkworthiness 过滤 | `claims[]`（CE3 后） | `kept[]`（仅可证伪事实主张） | **确定性**：`_is_water_claim` 剔除水词/过渡句/定义碎片 + `check_worthy` 过滤非事实句，仅保留可证伪事实主张进 Layer0.5~2，省 LLM 预算不污染判定（v0.4.8 #158 / v0.4.9 #163 D 强化） | AE1(#158) |
+| AC4/AC5 | 通用锚定闸门(内容线) | `content_extract`（SOP/大纲/主张） | `grounded[]` / `flagged[]`（标⚠️保留）/ 剔除编造步骤 | `core/ground_extract.py`：`gate_extract`（子串命中字幕blob+ts端点真）+ `apply_sop_gate`（编造SOP步骤剔除）+ `apply_flag_gate`（主张/大纲无依据标⚠️保留）；无字幕→全部判定 grounded 不误杀（v0.4.8 #157） | AC4/AC5(#157) |
+| E | 验真缺失告警 | `verify_claims_web` 权重状态 | 报告顶部「深度验真 Layer2」状态行 + 缺失时 logger.warning | Layer2 权重缺失/未装时明确告警，区分"无目标主张(正常)"与"权重缺失"，消除静默降级误判（v0.4.9 #164 E） | E(#164) |
+| F | 硬删留痕审计 | `claims[]` 各硬删点（AE1/L0.5） | `dropped_audit[{quote,ts,stage,reason}]` | 硬删过滤器改「隔离不销毁」，每条被删主张进审计列表，经 aggregate→claim_cache→报告「🔍 被过滤主张（审计）」全链路；用户可感知误杀并反馈调阈值（v0.4.9 F 任务） | F 任务 |
 | L3 | 验真·Layer3 联网核查框架 | `claims[]`（Layer2 仍 unverified 的公开事实主张） | `web_status=pending/verified` + 升级 `accuracy/evidence/confidence` | 可插拔检索后端；无 `ALBEDO_SEARCH_API_KEY` → 诚实降级标 `pending`（待联网核查），不臆断；配 key + backend 后接真搜索升级判定 | L3(#128) |
 | TT1 | 验真·Layer0.5 防瞎编 | `claim_verifications` + `subtitle_lines` | 丢弃无原文支撑的断言（faithfulness=ungrounded） | 每条抽取断言 vs 字幕原文 NLI，LLM 瞎编的（视频没有的）直接丢弃，防污染（V3 遗漏3） | TT1(#84) |
 | TT2 | 验真·话术识别 | `claim_verifications` + `clean_text` | `red_flags` / `weasel_flag` / `hedge_level`（就地写） | 规则不联网：绝对化骗局话术 + 水词 + 模糊语；中文数字归一（"十万"→"10万"） | TT2(#84) |
 | TT3 | 验真·自相矛盾 | `claim_verifications` | `contradicts_with` + `accuracy=contradicted` + 矛盾对列表 | 两两 NLI，逻辑必然不实的矛盾对标红 + 证据溯源（纯本地） | TT3(#84) |
 | TT4 | 验真·时效标记 | `claim_verifications` | `verified_date` + `validity_class`(timeboxed/evergreen) | 规则不联网：命中平台规则/价格/版本类→timeboxed 限时，接熔知 temporal_nature | TT4(#84) |
-| TT5 | 验真·联网深验(MiniCheck真实路径) | `claim_verifications` | `accuracy=supported/contradicted/unverified` + `confidence` + `evidence_grade=L4` | Layer2 MiniCheck 本地真实调用（`core/minicheck_verify.py`，flan-t5-large，本地确定性）；包未装/模型未下载→降级 `unverified`（保守不臆断）。详见 §6.2 验收注 | TT5(#84) |
+| TT5 | 验真·Layer2 本地中文验真(mDeBERTa-XNLI) | `claim_verifications` | `accuracy=supported/contradicted/unverified` + `confidence` + `evidence_grade=L4` | Layer2 **mDeBERTa-XNLI 本地确定性 NLI**（`core/minicheck_verify.py` 已重写为 mDeBERTa，MiniCheck 路线弃用）；权重缺失→降级 `unverified`（保守不臆断）。详见 `docs/RESEARCH-TRUTH-MODELS-CN-2026-07-17.md` | TT5(#84) |
 | TT6 | 验真·聚合 | `claim_verifications` + 丢弃数 | `truth_track{severity, trust_score, epistemic_status, is_personal, contradictions, recency_note, red_flags}` | 逐条汇总为文档级结论（真假/个人公开/可信度），映射进 `ingestion_meta` 落熔知；结论喂给 JUDGE 作证据来源 | TT6(#84) |
 | JUDGE | 判定·§6.2 证据链(D-S融合) | `claim_verifications` + `persuasion_polish`(G1) | `truthfulness.label/score/reasoning/evidence_grade`（确定性：真/假/可疑） | 逐条证据→D-S融合→文档级结论，取代 `assess.py` 自由 LLM label；同输入必得同结论（根治 L4 翻转）；G1 高包装+未验证→不轻信真（`core/judgment.py`，v0.4.1 新增） | JUDGE(#94 补) |
 | A5c | 验真·编排接入 | 各层输出 | `out.claim_verifications` / `out.truth_track` / `status`（矛盾或话术上调 suspect） | 内容线/通用路径均调 `_run_truth_track`；验真信号上调 status，保守不误伤 | A5c(#85) |
@@ -143,8 +151,14 @@ flowchart TD
 | T11 批量/队列（方案A） | C1 | v0.2.0（切片 C 后置） |
 | 验真 TT0–TT6 `core/truth_track.py` + 数据模型 `core/models.py` + 接入/报告 `flows/refine.py`/`core/report.py` | TT0→TT6 / A5c / A4c | v0.3.0 |
 | 形式线 FT0–FT7 + G1/G2 `core/form_track.py` + 数据模型 `core/models.py` + 接入/报告 `flows/refine.py`/`core/report.py` | FT0→FT7 / G1 / G2 / A5d / A4d | v0.4.0 |
-| §6.2 判定 JUDGE + TT6 MiniCheck 真实路径 `core/judgment.py` + `core/minicheck_verify.py` + 接入 `flows/refine.py`/`core/truth_track.py` | TT5(真实路径) / JUDGE / A5c | v0.4.1 |
+| §6.2 判定 JUDGE + TT6 Layer2 真实路径 `core/judgment.py` + `core/minicheck_verify.py`(后改 mDeBERTa-XNLI) + 接入 `flows/refine.py`/`core/truth_track.py` | TT5(真实路径·mDeBERTa) / JUDGE / A5c | v0.4.1 |
 | 抽主张重建 CE0–CE4 + Layer3 `core/salience.py` + `core/claim_cache.py` + `core/web_verify.py` + `core/truth_track.py` + `core/llm.py` + `flows/refine.py` | CE0 / CE1+CE2 / CE3 / CE4 / L3 / A5e | v0.4.3 |
+| LLM 韧性层（空响应重试 / 截断续写游标 / 组合频率门槛去重）`core/llm.py` + `core/truth_track` | 对策1~3 / B | v0.4.5 |
+| 审计修复（CE3标记不删 / guard回退CE3 / 信任分反转 / 截断游标 / 缓存冻结最终主张 / 重复行）+ CE0 时间桶覆盖 `core/truth_track`+`claim_cache`+`salience`+`llm` | #142–#146 / S1 / #141 / CE0(#123) | v0.4.6 |
+| 缓存冻结形式线（trust_score 微抖根治）`claim_cache`+`refine` | v0.4.6.1 |
+| verify_sig 版本化缓存失效 + save顺序修正冻结最终主张 + mDeBERTa-XNLI 替换 MiniCheck `claim_cache`+`truth_track`+`minicheck_verify` | v0.4.7 |
+| 报告质量根治（A 多轴分类 / B 混合路由+卖家声明 / C 通用锚定闸门 / D 快修数值时间戳与包装文案 / E checkworthiness 过滤 / F 标签语义重构+两分对齐）+ v4-flash 模型错配根因 `classify`+`ground_extract`+`truth_track`+`assess`+`report` | A~F(#154–#159) | v0.4.8 |
+| 内容线冻结 / 主张 ts 回填 / 水主张强化过滤 / 验真缺失告警 / 硬删留痕审计 / 去重修复 `claim_cache`+`truth_track`+`refine`+`report`+`minicheck_verify` | B/C/D/E/F(#161–#164,#170) | v0.4.9 |
 
 ---
 
@@ -161,3 +175,18 @@ Nigredo ──(字幕 full_text + info)──▶ Albedo ──(RefinedKnowledgeO
 - **Albedo 不碰**：采集（Nigredo）、分面分类/OCR/切块/向量化/入库（Citrinitas）、创作变现（Rubedo）、意图重写（OpusMagnum）、产品化封装（Rubedo）
 - **Albedo 交付物（单一报告，入库就绪）**：炼真只对外交付**一份人类可读鉴定报告**（Markdown），结构化 JSON 仅作 LLM 内部表示，不另维护双输出（ADR-004）。报告内嵌 `ingestion_meta` 块，**预填熔知入库分面**（content_type / domain UDC / temporal_nature / epistemic_status / trust_score / knowledge_type / target_platform / language / is_personal / access_level 等）——熔知入库直接读取、无需重填重分面（ADR-005）。其中 `quality.truthfulness.label` → 熔知 `epistemic_status`（真→corroborated / 可疑→unverified / 假→rejected），`trust_score` → 熔知 payload `trust_score`。
 - **平台无关 + 文本类型感知**：Albedo 只消费「文字」，不绑采集平台；但按「文本类型」(字幕/社媒文案/文档) 调整净化与评估策略。平台元数据由 Nigredo 归一化为统一信号包（互动热度/受众契合/口碑）后传入，Albedo 只吃归一化信号，不碰原始平台字段。
+
+---
+
+## 五、研究成果与文档索引
+
+本流程图每个节点背后都有调研 / 设计 / 审计文档支撑，全部在 `docs/`。完整清单（30+ 篇，含一句话主题）见 `PROJECT_PLAN.md` 的「研究文档索引」一节。关键驱动文档：
+
+- **验真方法论演进**：`docs/RESEARCH-TRUTH-VERIFICATION-2026-07-15.md`（V1~V3，从真假二分到证据链）、`RESEARCH-TRUTH-METHODS-AUDIT-2026-07-16.md`、`RESEARCH-TRUTH-STABILITY-QUALITY-2026-07-16.md`
+- **中文验真模型选型**：`docs/RESEARCH-TRUTH-MODELS-CN-2026-07-17.md`（8 个候选对比，选定 mDeBERTa-XNLI 的依据 + 未来比较计划）
+- **主张抽取设计**：`docs/DESIGN-CLAIM-EXTRACTION-2026-07-16.md`（V1/V2，自一致性并集 + CE0 骨架约束 + checkworthiness 过滤）
+- **内容线研究**：`docs/RESEARCH-CONTENT-TRACK-2026-07-15.md`、`RESEARCH-CONTENT-SUMMARY-2026-07-15.md`
+- **形式线研究**：`docs/RESEARCH-FORM-TRACK-2026-07-16.md`
+- **韧性 LLM 设计**：`docs/DESIGN-RESILIENT-LLM-2026-07-16.md`
+- **过滤器审计**：`docs/FILTER-AUDIT-2026-07-17.md`（盘点全部硬删点，确立「隔离不销毁」原则与硬删留痕审计）
+- **数据 / 竞品分析**：`docs/RESEARCH-DATA-ANALYSIS-2026-07-15.md`（系列）、`ALBEDO-LEGACY-CODE-ANALYSIS-2026-07-09.md`
