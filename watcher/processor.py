@@ -1,4 +1,5 @@
-"""中转②产出：refine() → 写 {bv}_refined.md（含文件头 YAML frontmatter 机读契约）
+"""中转②产出：refine() → 写 {bv}_refined.md（含文件头 YAML frontmatter 机读契约）。
+机读契约权威文档：albedo-citrinitas-handoff-spec.md（Claw 工作区根目录）；本模块只按契约产出，不定义契约。
 
 - REQUIRE_HUMAN_REVIEW=false：写进 OUTPUT_DIR（被熔知监控摄入）
 - REQUIRE_HUMAN_REVIEW=true：写进 OUTPUT_DIR/review_pending/（待晋级）

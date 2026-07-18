@@ -879,6 +879,7 @@ def _render_form_track(o: dict) -> str:
 
 
 # ── v1.1 B-only：主契约 frontmatter 生成（唯一机读载体，供熔知 hook 强制解析）──
+#    权威契约文档：albedo-citrinitas-handoff-spec.md（Claw 工作区根目录）§5.3；字段增减须回该文档。
 def build_ingestion_frontmatter(out) -> dict:
     """构造炼真↔熔知主契约 frontmatter（§5.3）。
 
