@@ -86,6 +86,7 @@ class AlbedoInput:
     title: str = ""
     up_name: str = ""
     source_url: str = ""
+    keywords: list = field(default_factory=list)  # 视频标签(=熔知关键词)；Nigredo 爬取后传入，炼真原样传递（决策②）
     # —— 内容线结构化信号（2026-07-15 新增，全部可选，向后兼容旧调用）——
     # 来源：Nigredo 中转 .md 经 parser 解析后填入；非字幕输入可留空走通用路径。
     subtitle_lines: list = field(default_factory=list)   # [{ts:"mm:ss", start:float, text:str}] 解析 # 字幕 段

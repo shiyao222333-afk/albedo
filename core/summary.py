@@ -38,7 +38,8 @@ def _build_messages(clean_text: str, context: str) -> list:
         "请严格只输出如下 JSON，不要任何额外说明：\n"
         '{"gist": "1~2句概括（与原文同语言）", '
         '"bullets": ["要点1", "要点2", "..."], '
-        '"key_claims": ["可被验证的主张1", "可被验证的主张2", "..."]}'
+        '"key_claims": ["可被验证的主张1", "可被验证的主张2", "..."], '
+        '"subject": "本视频的核心题材/领域，2~8字，如\'Python编程\'\'减肥食谱\'\'二战史\'（只取最上位主题，不写具体结论）"}'
     )
     return [
         {"role": "system", "content": sys_msg},
@@ -87,11 +88,12 @@ def summarize_content(clean_text: str, context: str = "") -> dict:
         gist = (data.get("gist") or "").strip()
         bullets = _coerce_list(data.get("bullets"), _MAX_BULLETS)
         key_claims = _coerce_list(data.get("key_claims"), _MAX_KEY_CLAIMS)
+        subject = (data.get("subject") or "").strip()
 
         # gist 缺失兜底（仍失败时退回前 200 字）
         if not gist:
             gist = text[:_FALLBACK_GIST_LEN]
-        return {"gist": gist, "bullets": bullets, "key_claims": key_claims}
+        return {"gist": gist, "bullets": bullets, "key_claims": key_claims, "subject": subject}
 
     except Exception:
         # 降级 ②：LLM 调用或解析失败，gist 取前 200 字，其余留空

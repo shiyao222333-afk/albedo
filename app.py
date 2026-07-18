@@ -42,6 +42,12 @@ def _parse_nigredo_json(obj: dict) -> AlbedoInput:
     """
     text = obj.get("text") or obj.get("content") or obj.get("subtitle") or ""
     meta = obj.get("meta") or {}
+    # 决策②：Nigredo 爬取的视频 tag 即熔知关键词，字段名在 Nigredo 侧为 keywords/tags，
+    # 炼真原样接住并传递（最多 8 个、去空格、字符串化）。
+    raw_kw = obj.get("keywords") or obj.get("tags") or meta.get("keywords") or meta.get("tags") or []
+    if isinstance(raw_kw, str):
+        raw_kw = [raw_kw]
+    keywords = [str(k).strip() for k in raw_kw if str(k).strip()][:8]
     return AlbedoInput(
         text=text,
         text_type=obj.get("text_type", "subtitle"),
@@ -50,6 +56,7 @@ def _parse_nigredo_json(obj: dict) -> AlbedoInput:
         title=obj.get("title") or meta.get("title") or "",
         up_name=obj.get("up_name") or meta.get("up_name") or "",
         source_url=obj.get("source_url") or meta.get("source_url") or "",
+        keywords=keywords,
     )
 
 
