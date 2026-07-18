@@ -129,7 +129,10 @@ class Monetization:
     note: str = ""
 
 
-# ── 入库元数据（ADR-005）：预填熔知分面，入库直读直存 ──
+# ── 入库元数据（ADR-005）：弃用（v1.1）──
+# ⚠️ DEPRECATED：v1.1 起 frontmatter 升为唯一主契约载体（§3.1 决策③），
+# 不再由 IngestionMeta 生成 sidecar。入库字段改由 core.report.build_ingestion_frontmatter(out)
+# 直接从 RefinedKnowledgeObject 取值构造。本数据类仅保留向后兼容，请勿在新代码引用。
 @dataclass
 class IngestionMeta:
     content_type: str = ""
@@ -138,7 +141,7 @@ class IngestionMeta:
     domain_label: str = ""
     temporal_nature: str = ""       # evergreen / timeboxed / transient
     epistemic_status: str = ""      # 由 quality.truthfulness.label 推
-    trust_score: float = 0.0        # 0-1
+    trust_score: float = 0.0        # 0-5（与熔知库一致；原 0-1 口径已于 v1.1 整合算法废除）
     knowledge_type: str = ""
     target_platform: str = ""
     language: str = ""
@@ -232,6 +235,9 @@ class RefinedKnowledgeObject:
     references: list = field(default_factory=list)
     report: str = ""
     ingestion_meta: IngestionMeta = field(default_factory=IngestionMeta)
+    # v1.1：compute_verdict 单一信任出口结果（0-5 信任分 + epistemic_status + severity），
+    # build_ingestion_frontmatter 与报告结论卡同源读取。
+    verdict: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """序列化为纯 dict（字段值均为 JSON 可序列化类型），用于落盘 data/out/<video_id>.json。"""

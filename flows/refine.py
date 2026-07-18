@@ -29,8 +29,8 @@ from core.models import (
     Truthfulness,
     Monetization,
     Status,
-    IngestionMeta,
 )
+from core.verdict import compute_verdict
 from core.purify import purify
 from core.assess import (
     assess_truthfulness,
@@ -222,29 +222,38 @@ def refine(
     # assess.py 退为"参考"（数值/变现/启发式评分），判定结论改由确定性证据链给出，
     # 根治"同输入三轮翻盘 suspect/suspect/true"。
     try:
-        verdict = judge_document(
+        dv = judge_document(
             claim_verifications,
             persuasion_polish=ft.get("persuasion_polish", 0.0),
         )
-        truthfulness.label = verdict.truth_label
-        truthfulness.score = int(verdict.confidence * 100)
-        truthfulness.reasoning = verdict.reasoning
-        truthfulness.evidence_grade = "L4" if verdict.layer2_active else "L1"
-        truthfulness.verification_level = verdict.verification_level
+        truthfulness.label = dv.truth_label
+        truthfulness.score = int(dv.confidence * 100)
+        truthfulness.reasoning = dv.reasoning
+        truthfulness.evidence_grade = "L4" if dv.layer2_active else "L1"
+        truthfulness.verification_level = dv.verification_level
     except Exception:
         # 判定模块异常不阻断，回退 assess 的降级结果
         pass
 
+    # ── §2.6 单一信任出口：整合算法推导 0-5 信任分 + epistemic_status + severity ──
+    # 取代旧 truth_track.aggregate 的 0-1 散分 + truthfulness.label 双源（🔴B2 已废弃）。
+    v = compute_verdict(
+        claim_verifications,
+        truthfulness,
+        ft.get("persuasion_polish", 0.0),
+    )
+
     # ── A3 溯源（纯函数，缺字段留空不抛）──
     provenance = build_provenance(inp)
 
-    # ── 由真实性 label 推入库 status（验真矛盾/话术信号上调为存疑，保守不误伤）──
+    # ── 由真实性 label 推入库 status ──
+    # 仅当判定为「真(accepted)」但验真检出矛盾/话术信号(alert/warn)时，保守下调为存疑；
+    # 已判「假(rejected)」不被反向降级（保持 rejected 结论）。
     status = _LABEL_TO_STATUS.get(truthfulness.label, Status.SUSPECT.value)
-    if truth_track.get("severity") in ("alert", "warn"):
+    if status == Status.ACCEPTED.value and v["severity"] in ("alert", "warn"):
         status = Status.SUSPECT.value
 
-    # ── 组装完整精炼对象（v0.2.0 字段全填；copywriting/structure/logic 留默认 DimensionScore，
-    #    trust_score 留 0.0 待 FPF 模块；references/ingestion_meta 切片 B 补全）──
+    # ── 组装完整精炼对象（v0.2.0 字段全填；copywriting/structure/logic 留默认 DimensionScore）──
     out = RefinedKnowledgeObject(
         input_ref=inp,
         clean_text=clean_text,
@@ -266,13 +275,8 @@ def refine(
         truth_track=truth_track,
         form_track=form_track,
         form_score=form_score,
-        trust_score=truth_track.get("trust_score", 0.0),
-        ingestion_meta=IngestionMeta(
-            content_type=content_type,
-            epistemic_status=truth_track.get("epistemic_status", ""),
-            is_personal=truth_track.get("is_personal", False),
-            trust_score=truth_track.get("trust_score", 0.0),
-        ),
+        trust_score=v["trust_score"],   # §2.6 整合算法产出（0-5 单档，取代旧 FPF 0-1）
+        verdict=v,                      # compute_verdict 结果，frontmatter 与报告结论卡同源
     )
 
     # ── A4 报告渲染（纯逻辑，不抛；失败兜底占位）──

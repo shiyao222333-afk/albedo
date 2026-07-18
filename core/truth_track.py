@@ -236,7 +236,7 @@ def extract_claims_self_consistent(
                 occurrences.append(cd)
 
     if not occurrences:
-        return []
+        return [], 1.0  # 无主张：确定性空输入，视为完全自洽
 
     # 频率统计
     freq = Counter(o["_key"] for o in occurrences)
@@ -266,10 +266,15 @@ def extract_claims_self_consistent(
         seen.add(o["_key"])
         o.pop("_key", None)
         final.append(o)
-    # 重排 claim_id 连续（c0..c{n-1}）
+    # 重排 claim_id 连续（c0..c{n-1)）
     for i, o in enumerate(final):
         o["claim_id"] = f"c{i}"
-    return final
+    # 自洽置信（§5.4 ext_num1）：通过频率门槛/豁免的主张数 ÷ 总候选主张数。
+    # 越高=抽取越稳定自洽；非抽样/空输入由调用方记 1.0。
+    total_candidates = len(freq)
+    passed = len(seen)
+    consistency = round(passed / total_candidates, 3) if total_candidates else 1.0
+    return final, consistency
 
 
 def _extract_one_page(msgs: list, label: str, llm_kwargs: dict, rf: dict) -> list:
@@ -696,13 +701,12 @@ def verify_claims_web(claims: list, llm_kwargs: dict = None, subtitle_lines: lis
 # 聚合：文档级结论（落熔知字段 + 报告）
 # ───────────────────────────────────────────────────────────────────────────
 def aggregate(claims: list, dropped_count: int = 0, persuasion_polish: float = 0.0, dropped_audit: list = None) -> dict:
-    """聚合逐条结果为文档级摘要。
+    """聚合逐条结果为文档级摘要（计数统计 + severity，供报告展示）。
 
-    信任分(0-1)保守：未验证不过高（V3 遗漏5）。矛盾→0.3，话术→0.4，
-    个人经验/观点→0.5，可证伪公开事实→0.6；上限 0.6（公开事实理论上可外部验证，
-    信任应高于无法验证的主观经验）。
+    ⚠️ v1.1 废弃：本函数不再产出 trust_score / epistemic_status（🔴B2 旧死逻辑）。
+    真实信任结论改由 core.verdict.compute_verdict 单一推导（0-5 尺度）。
+    此处仅保留计数统计与 severity（供报告与 status 升级判定使用）。
     severity: alert(矛盾) / warn(话术) / ok。
-    persuasion_polish(G1 反向桥)：高说服包装 + 证据未验证 → 额外谨慎（轻微下调信任）。
     """
     claims = claims or []
     n = len(claims)
@@ -760,8 +764,7 @@ def aggregate(claims: list, dropped_count: int = 0, persuasion_polish: float = 0
         "n_timeboxed": n_timeboxed,
         "is_personal": is_personal,
         "severity": severity,
-        "trust_score": trust,
-        "epistemic_status": epistemic_status,
+        # 注：trust_score / epistemic_status 已废弃（🔴B2），改由 compute_verdict 产出
         "contradictions": contradictions,
         "recency_note": recency_note,
         "persuasion_polish": persuasion_polish,
@@ -801,6 +804,9 @@ def _run_truth_track(
     key_sentences = key_sentences or []
     subtitle_lines = subtitle_lines or []
     llm_kwargs = llm_kwargs or {}
+    # 自洽置信（§5.4 ext_num1）：默认 1.0（缓存命中/非抽样路径视为确定性复现）。
+    # 仅 CE1+CE2 自一致性抽主张路径会覆盖为真实频率比值。
+    consistency = 1.0
 
     # 验真配置指纹（v0.4.7）：模型/逻辑/LLM 任一变化 → 旧缓存自动失效
     sig = compute_verify_sig()
@@ -831,7 +837,7 @@ def _run_truth_track(
         dropped_audit = []
         # ── CE1+CE2 自一致性抽主张（约束骨架；无骨架退化旧路径）──
         if skeleton:
-            claims = extract_claims_self_consistent(
+            claims, consistency = extract_claims_self_consistent(
                 skeleton, getattr(inp, "title", "") or "", llm_kwargs,
                 n_samples=N_SAMPLES, response_format=RESPONSE_FORMAT,
             )
@@ -912,6 +918,8 @@ def _run_truth_track(
 
     truth_track = aggregate(kept, ce_dropped + l0_dropped + claims_ae1_dropped,
                              persuasion_polish=persuasion_polish, dropped_audit=dropped_audit)
+    # 自洽置信（§5.4 ext_num1）：随 truth_track 传出，供 build_ingestion_frontmatter 落 frontmatter
+    truth_track["self_consistency"] = consistency
     return {"claims": kept, "truth_track": truth_track,
             "dropped": ce_dropped + l0_dropped + claims_ae1_dropped,
             "dropped_audit": dropped_audit}

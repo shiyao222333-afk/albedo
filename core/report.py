@@ -19,8 +19,21 @@ from datetime import datetime
 
 from core.assess import check_numeric_consistency
 
+try:
+    import yaml  # v1.1 B-only：frontmatter 用 yaml.safe_dump 保证合法（见 §5.3/§3.3）
+except Exception:  # pragma: no cover - 仅当未装 pyyaml 时退化到内置发射器
+    yaml = None
+
 
 _DEG = "（该维度未能生成）"   # 降级占位：某维度未能产出时显示
+
+# refined_status 枚举映射（AI 设计决策，非用户指令，待用户确认）：
+# out.status ∈ {accepted, suspect, rejected} → 契约 refined_status ∈ {ok, needs_review, failed}
+_STATUS_TO_REFINED = {
+    "accepted": "ok",
+    "suspect": "needs_review",
+    "rejected": "failed",
+}
 
 # 数值预检红色信号英文标签 → 中文（让报告"说人话"；维度名 income/time_to_result 等已可读，不改）
 _RED_FLAG_CN = {
@@ -865,6 +878,127 @@ def _render_form_track(o: dict) -> str:
     return "\n".join(lines)
 
 
+# ── v1.1 B-only：主契约 frontmatter 生成（唯一机读载体，供熔知 hook 强制解析）──
+def build_ingestion_frontmatter(out) -> dict:
+    """构造炼真↔熔知主契约 frontmatter（§5.3）。
+
+    取值来源：
+      content_type        ← out.content_type（炼真 classify_content 产出）
+      epistemic_status /
+      trust_score         ← compute_verdict 结果（0-5，单一信任出口）
+      subject /
+      keywords /
+      auto_summary        ← 提炼结果（含防御性回退）
+      ext_num1            ← 验真自洽置信 out.truth_track["self_consistency"]（§5.4）
+      ext_text1           ← 验真方法字符串（审计溯源）
+      refined_status      ← out.status 映射 ok/needs_review/failed
+
+    ⚠️ 边界（AI 设计决策，非用户指令，待确认）：temporal_nature / knowledge_type /
+    is_personal 属熔知分面分类法（用户决策「分面分类法不移交炼真」），此处**不产出**，
+    交由熔知 classify_pipeline 派生；albedo_frontmatter_hook 仅强制覆盖 frontmatter 中
+    出现的契约键，故这三键留空由熔知兜底，不被错误覆盖。
+    """
+    o = _to_dict(out)
+    fm: dict = {}
+
+    # 必填：content_type（炼真产出）
+    ct = _str(o.get("content_type"))
+    if ct:
+        fm["content_type"] = ct
+
+    # 必填：epistemic_status / trust_score（compute_verdict 单一出口，0-5）
+    verdict = o.get("verdict") or {}
+    eps = _str(verdict.get("epistemic_status"))
+    if eps:
+        fm["epistemic_status"] = eps
+    ts = verdict.get("trust_score")
+    if isinstance(ts, (int, float)):
+        fm["trust_score"] = float(ts)
+
+    # 提炼结果：auto_summary / subject / keywords（含防御性回退）
+    summary = o.get("summary") or {}
+    gist = _str(summary.get("gist"))
+    if gist:
+        fm["auto_summary"] = gist
+
+    # subject 优先取标题（题材即标题），回退 gist；仍无则填"无"（契约约定）
+    title = (_str((o.get("input_ref") or {}).get("title"))
+             or _str((o.get("provenance") or {}).get("title")))
+    fm["subject"] = title if title else (gist if gist else "无")
+
+    # keywords 防御性回退：关键主张 → 标题；无则留空（hook 会跳过空值）
+    kc = summary.get("key_claims") or []
+    kws = [str(x).strip() for x in kc if str(x).strip()][:8] if isinstance(kc, list) else []
+    if not kws and title:
+        kws = [title]
+    if kws:
+        fm["keywords"] = kws
+
+    # 验真：ext_num1 自洽置信（§5.4）；ext_text1 验真方法（审计）
+    tt = o.get("truth_track") or {}
+    sc = tt.get("self_consistency")
+    if isinstance(sc, (int, float)):
+        fm["ext_num1"] = round(float(sc), 3)
+
+    truth = (o.get("quality") or {}).get("truthfulness") or {}
+    eg = _str(truth.get("evidence_grade"))
+    vl = _str(truth.get("verification_level"))
+    if eg == "L4":
+        fm["ext_text1"] = "mDeBERTa-XNLI+本地字幕核验"
+    elif vl == "externally_verified":
+        fm["ext_text1"] = "外部核查已验证"
+    else:
+        fm["ext_text1"] = "未联网深验（deepseek规则+字幕自洽）"
+
+    # refined_status：由入库 status 映射（ok/needs_review/failed）
+    status = _str(o.get("status"))
+    fm["refined_status"] = _STATUS_TO_REFINED.get(status, "needs_review")
+
+    return fm
+
+
+def _dump_frontmatter(fm: dict) -> str:
+    """把契约 dict 序列化为合法 YAML 块（§5.3 强制定 yaml.safe_dump）。
+
+    优先用 pyyaml（requirements 已含）；缺失时退化到内置最小发射器
+    （仅覆盖本契约已知标量/bool/list 类型），保证报告主交付物不因缺依赖而崩。
+    """
+    if yaml is not None:
+        return yaml.safe_dump(fm, allow_unicode=True, sort_keys=False).rstrip()
+    return _fallback_yaml_dump(fm)
+
+
+def _fallback_yaml_dump(fm: dict) -> str:
+    """pyyaml 缺失时的兜底 YAML 发射器（仅处理本契约字段类型）。"""
+    def q(s: str) -> str:
+        s = str(s).replace("\\", "\\\\").replace('"', '\\"')
+        return '"' + s + '"'
+
+    def need_quote(s: str) -> bool:
+        if s != s.strip() or s == "":
+            return True
+        return any(ch in s for ch in [": ", "#", "[", "]", "{", "}", "'", '"', "\n"])
+
+    lines = []
+    for k, v in fm.items():
+        if isinstance(v, bool):
+            lines.append(f"{k}: {'true' if v else 'false'}")
+        elif isinstance(v, (int, float)):
+            lines.append(f"{k}: {v}")
+        elif isinstance(v, list):
+            if not v:
+                lines.append(f"{k}: []")
+            else:
+                lines.append(f"{k}:")
+                for item in v:
+                    sv = str(item)
+                    lines.append(f"- {q(sv) if need_quote(sv) else sv}")
+        else:
+            sv = str(v)
+            lines.append(f"{k}: {q(sv) if need_quote(sv) else sv}")
+    return "\n".join(lines)
+
+
 # ── A4 编排主入口 ──
 def render_report(out, inp=None) -> str:
     """渲染人读 Markdown 鉴定报告（ADR-004 单报告，主交付物）。
@@ -878,7 +1012,15 @@ def render_report(out, inp=None) -> str:
     o = _to_dict(out)
     i = _to_dict(inp) if inp is not None else {}
 
+    # v1.1 B-only：报告头部注入机读 frontmatter（唯一主契约载体），供熔知 hook 强制解析
+    fm = build_ingestion_frontmatter(out)
+    fm_block = _dump_frontmatter(fm)
+
     head = [
+        "---",
+        fm_block,
+        "---",
+        "",
         "# 🔬 炼真鉴定报告 (Albedo)",
         "",
         f"> 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}",
