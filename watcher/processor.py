@@ -11,7 +11,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from config import WATCH_DIR, OUTPUT_DIR, REQUIRE_HUMAN_REVIEW
+from config import WATCH_DIR, OUTPUT_DIR, REQUIRE_HUMAN_REVIEW, KEEP_INPUT
 from flows.refine import refine
 from watcher.parser import parse_transit_md
 
@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 
 
 def _archive(src_path: Path, ok: bool) -> None:
+    # 验收开关：保留中转①，改名 .keep 留在 WATCH_DIR（watcher 只扫 *.md，故不会被重处理）
+    if KEEP_INPUT:
+        try:
+            kept = src_path.with_name(src_path.name + ".keep")
+            shutil.move(str(src_path), str(kept))
+            logger.info(f"[验收保留] 中转①保留于: {kept}")
+            return
+        except Exception as e:
+            logger.warning(f"[验收保留] 失败，回退归档: {e}")
+
     dest_dir = WATCH_DIR / ("done" if ok else "failed")
     dest_dir.mkdir(parents=True, exist_ok=True)
     try:
