@@ -886,17 +886,18 @@ def build_ingestion_frontmatter(out) -> dict:
       content_type        ← out.content_type（炼真 classify_content 产出）
       epistemic_status /
       trust_score         ← compute_verdict 结果（0-5，单一信任出口）
-      subject /
-      keywords /
-      auto_summary        ← 提炼结果（含防御性回退）
+      auto_summary        ← 提炼结果（gist，含防御性回退）
       ext_num1            ← 验真自洽置信 out.truth_track["self_consistency"]（§5.4）
       ext_text1           ← 验真方法字符串（审计溯源）
       refined_status      ← out.status 映射 ok/needs_review/failed
 
-    ⚠️ 边界（AI 设计决策，非用户指令，待确认）：temporal_nature / knowledge_type /
-    is_personal 属熔知分面分类法（用户决策「分面分类法不移交炼真」），此处**不产出**，
-    交由熔知 classify_pipeline 派生；albedo_frontmatter_hook 仅强制覆盖 frontmatter 中
-    出现的契约键，故这三键留空由熔知兜底，不被错误覆盖。
+    ⚠️ 边界（均为用户决策，非 AI 臆造）：
+      · temporal_nature / knowledge_type / is_personal —— 用户决策（2026-07-09）：
+        分面分类法（UDC facet）不移交炼真，此处**不产出**，交由熔知 classify_pipeline 派生。
+      · subject（视频题材）/ keywords（视频关键词）—— 用户决策（2026-07-17）：
+        二者为语义派生字段，炼真**不产出**，交由熔知在 build_payloads 唯一汇合点用 LLM 兜底。
+      albedo_frontmatter_hook 仅强制覆盖 frontmatter 中出现的契约键，故上述键均不写入
+      frontmatter，留空由熔知兜底，不被错误覆盖。
     """
     o = _to_dict(out)
     fm: dict = {}
@@ -915,24 +916,15 @@ def build_ingestion_frontmatter(out) -> dict:
     if isinstance(ts, (int, float)):
         fm["trust_score"] = float(ts)
 
-    # 提炼结果：auto_summary / subject / keywords（含防御性回退）
+    # 提炼结果：auto_summary（gist，含防御性回退）
     summary = o.get("summary") or {}
     gist = _str(summary.get("gist"))
     if gist:
         fm["auto_summary"] = gist
 
-    # subject 优先取标题（题材即标题），回退 gist；仍无则填"无"（契约约定）
-    title = (_str((o.get("input_ref") or {}).get("title"))
-             or _str((o.get("provenance") or {}).get("title")))
-    fm["subject"] = title if title else (gist if gist else "无")
-
-    # keywords 防御性回退：关键主张 → 标题；无则留空（hook 会跳过空值）
-    kc = summary.get("key_claims") or []
-    kws = [str(x).strip() for x in kc if str(x).strip()][:8] if isinstance(kc, list) else []
-    if not kws and title:
-        kws = [title]
-    if kws:
-        fm["keywords"] = kws
+    # ⚠️ subject（题材）/ keywords（关键词）此处**不产出**（用户决策 2026-07-17）：
+    # 二者是语义派生字段，交由熔知 build_payloads 用 LLM 兜底；若写入空值会被 hook 当作
+    # "已填"而错误覆盖熔知派生结果，故直接不写这两个键。
 
     # 验真：ext_num1 自洽置信（§5.4）；ext_text1 验真方法（审计）
     tt = o.get("truth_track") or {}
