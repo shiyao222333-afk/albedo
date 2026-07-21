@@ -34,12 +34,13 @@ REQUIRE_HUMAN_REVIEW = os.getenv("ALBEDO_REQUIRE_HUMAN_REVIEW", "false").lower()
 POLL_INTERVAL = float(os.getenv("ALBEDO_POLL_INTERVAL", "5"))
 
 # === 验收开关：保留中转①（KEEP_INPUT）===
-# 仅「巨作验收流程」拉起炼真时通过环境变量 ALBEDO_KEEP_INPUT=1 开启。
+# 统一「巨作验收流程」开关 ACCEPTANCE_KEEP_FILES：harness 拉起炼真 / 熔知时通过此变量=1 开启，
+# 两器同时受控（炼真保留中转①、熔知保留收件箱原文件）。改一个开关即可，验收结束停服务即恢复。
 # 开启后，_archive 不把中转①移入 done/，而是改名 .keep 留在 WATCH_DIR：
 #   - 不被删除（防误删）
 #   - watcher 只扫 *.md，.keep 不会被重处理
 # 平时不带该变量 → 原归档行为（移入 done/），不影响正常链路。
-KEEP_INPUT = os.getenv("ALBEDO_KEEP_INPUT", "false").lower() in ("1", "true", "yes")
+KEEP_INPUT = os.getenv("ACCEPTANCE_KEEP_FILES", "false").lower() in ("1", "true", "yes")
 
 # 确保目录存在（独立进程也能自建）
 WATCH_DIR.mkdir(parents=True, exist_ok=True)

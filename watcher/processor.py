@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def _archive(src_path: Path, ok: bool) -> None:
-    # 验收开关：保留中转①，改名 .keep 留在 WATCH_DIR（watcher 只扫 *.md，故不会被重处理）
+    # 验收开关（ACCEPTANCE_KEEP_FILES）：保留中转①，改名 .keep 留在 WATCH_DIR（watcher 只扫 *.md，故不会被重处理）
     if KEEP_INPUT:
         try:
             kept = src_path.with_name(src_path.name + ".keep")

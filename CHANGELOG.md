@@ -2,6 +2,15 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号采用语义化（MAJOR.MINOR.PATCH）。
 
+## [Unreleased]
+
+### Fixed
+- **溯源字段未写入 refined frontmatter（验收 #1/#2/#3 根因）** `core/report.build_ingestion_frontmatter`：原仅写 `content_type`/`target_platform` 等，从未写 `title`/`up_name`(→`author`+`up_name`)/`source_url`/`language`。导致熔知分类器 Layer 0.5 读不到「文件真相源」→ 标题由 LLM 漂移（验收 #3 三轮不一致）、`author`/`source_url` 空值致溯源断链（验收 #2）、`language` 兜底 `en` 误判中文（验收 #1）。现从 `input_ref`（parser 已读入的 `title`/`up_name`/`source_url`）写入；`language` 显式声明 `"zh"`（炼真报告恒为中文）。空值不写，留空由熔知兜底。配合熔知 `config/hooks._CONTRACT_KEYS` 扩围（`language`/`title`/`author`/`source_url`/`up_name`）双保险强制覆盖。
+- **审计块与漏斗自相矛盾（A 类报告 bug）** `core/truth_track._run_truth_track`：缓存命中时漏斗数字（`extracted`/`ae1_dropped`/`l0_dropped`）原按 `len(kept)` 与 0 当场重算，与冻结的 `dropped_audit`（审计块）不同源 → 报告出现"抽2剔0"却列 11 条被删的自相矛盾。现改由 `kept + dropped_audit` 反推漏斗，两者同源。仅改报告数字，不影响验真结论与入库。
+- **来源平台字段漏传（B 类）** `core/report.build_ingestion_frontmatter`：refined 报告 frontmatter 原未写 `target_platform`，下游熔知该字段为空。现从 `input_ref.signals.platform`（parser 已读入）取值写入；无信号时不写（留空由熔知兜底）。
+- **评论未展示（A1 类）** `core/report`：高赞评论（`comments_top`）已解析进 `AlbedoInput` 但报告无独立章节，读者看不到观众反驳。新增 `_render_comments` 章节「💬 观众评论（观众观点 · 非证据）」，展示置顶+高赞评论，带「互动≠证据」护栏标注。
+- **互动数据未解析/未展示（A2 类）** `watcher/parser._parse_engagement` + `core/report._render_engagement`：`parser.py` 原 `signals` 只填 `platform`，漏掉 frontmatter 的播放/赞/藏/币/分享/评论/弹幕计数与三率。现新增 `_parse_engagement` 把上述字段映射进 `signals["engagement"]`（null 字段不写，向后兼容）；报告新增「📊 热度 / 口碑（互动数据 · 非证据）」章节渲染，带「互动≠证据」护栏（高赞/高播放只代表受欢迎不代表内容可信）。
+
 ## [0.4.9] - 2026-07-17
 
 > 内容线冻结（治轮间漂移）+ 验真健壮性增强 + 硬删留痕审计 + 馏析→炼真桥 + 去重修复。3× 鲁棒性测试在「带 torch 正确环境 + Layer2 启用」下验证：truth_label=true×3、status=accepted×3、trust=0.51×3，RESULT CHECK。

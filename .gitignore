@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .watcher.pid
+venv/                # 隔离环境为生成物，一键部署由 setup.bat 重建，不入库
 data/out/*.json
 data/out/*.md
 data/out/*.log

@@ -19,10 +19,7 @@ from datetime import datetime
 
 from core.assess import check_numeric_consistency
 
-try:
-    import yaml  # v1.1 B-only：frontmatter 用 yaml.safe_dump 保证合法（见 §5.3/§3.3）
-except Exception:  # pragma: no cover - 仅当未装 pyyaml 时退化到内置发射器
-    yaml = None
+import yaml  # 硬依赖（requirements 已含 pyyaml>=6.0）：frontmatter 用 yaml.safe_dump 保证合法（见 §5.3/§3.3）
 
 
 _DEG = "（该维度未能生成）"   # 降级占位：某维度未能产出时显示
@@ -71,6 +68,13 @@ def _str(v) -> str:
     if isinstance(v, str):
         return v.strip()
     return str(v).strip()
+
+
+def _fmt_int(v):
+    """互动计数可能是 float(如 2426.0)，展示时去小数点。"""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
 
 
 def _list(v) -> list:
@@ -658,6 +662,21 @@ def _render_truth_track(o: dict) -> str:
         lines.append(f"- 时效：{tt['recency_note']}")
     if tt.get("is_personal"):
         lines.append("- 含第一人称经验主张（不可外部证伪，按内部自洽采纳）")
+    # #247 验真漏斗：让"误杀≠防瞎编"透明可见
+    funnel = tt.get("funnel")
+    if isinstance(funnel, dict):
+        ex = funnel.get("extracted", 0)
+        ae1 = funnel.get("ae1_dropped", 0)
+        ce3 = funnel.get("ce3_ungrounded", 0)
+        l0 = funnel.get("l0_dropped", 0)
+        kp = funnel.get("kept", 0)
+        lines.append(
+            f"- 📊 **验真漏斗**：抽出 {ex} → AE1 剔 {ae1} → CE3 未锚定 {ce3} → "
+            f"Layer0.5 删 {l0} → **保留 {kp}**"
+        )
+        alarm = funnel.get("alarm")
+        if alarm:
+            lines.append(f"- {alarm}")
     lines.append("")
 
     for c in claims:
@@ -880,34 +899,110 @@ def _render_form_track(o: dict) -> str:
 
 # ── v1.1 B-only：主契约 frontmatter 生成（唯一机读载体，供熔知 hook 强制解析）──
 #    权威契约文档：albedo-citrinitas-handoff-spec.md（Claw 工作区根目录）§5.3；字段增减须回该文档。
+# 来源平台 → 载体类型(content_type) 映射；未来新来源加项即可，不写死。
+# 依据：炼真输入带来源平台信号(input_ref.signals.platform)，据此检测载体类型。
+_PLATFORM_TO_CONTENT_TYPE = {
+    "bilibili": "video_script",
+    "douyin": "video_script",
+    "tiktok": "video_script",
+    "youtube": "video_script",
+    "xhs": "social_post",
+    "xiaohongshu": "social_post",
+    "wechat": "article",
+    "weixin": "article",
+    "gongzhonghao": "article",
+    "zhihu": "article",
+    "web": "webpage",
+    "website": "webpage",
+    "document": "document",
+    "pdf": "document",
+}
+
+
+def _detect_content_type(inp) -> str:
+    """由输入来源平台检测载体类型(content_type)，未知回退 other。"""
+    signals = inp.get("signals") if isinstance(inp, dict) else getattr(inp, "signals", {})
+    platform = (signals or {}).get("platform", "") if isinstance(signals, dict) else getattr(signals, "platform", "")
+    platform = str(platform).strip().lower()
+    return _PLATFORM_TO_CONTENT_TYPE.get(platform, "other")
+
+
 def build_ingestion_frontmatter(out) -> dict:
     """构造炼真↔熔知主契约 frontmatter（§5.3）。
 
     取值来源：
-      content_type        ← out.content_type（炼真 classify_content 产出）
+      content_type        ← 输入来源平台检测（_detect_content_type：视频脚本/文章/网页…）
       epistemic_status /
       trust_score         ← compute_verdict 结果（0-5，单一信任出口）
       auto_summary        ← 提炼结果（gist，含防御性回退）
       ext_num1            ← 验真自洽置信 out.truth_track["self_consistency"]（§5.4）
       ext_text1           ← 验真方法字符串（审计溯源）
       refined_status      ← out.status 映射 ok/needs_review/failed
+      title / author(up_name) / source_url ← 溯源透传（input_ref，parser 已提取）
+      language           ← 炼真报告恒为中文，显式 "zh"（防熔知误判 en）
 
     ⚠️ 边界（均为用户决策，非 AI 臆造；2026-07-17 决策 Y + ①②③ 最终版）：
       · is_personal / temporal_nature —— 决策 Y：炼真实产（信号来自 truth_track.aggregate），
         熔知仅在炼真未跑时兜底。
-      · subject（题材）—— 决策①：炼真提炼（summary.subject，LLM 产出），无则熔知 LLM 兜底。
-      · keywords（关键词）—— 决策②：馏析爬取视频 tag → 炼真原样传递（input_ref.keywords），
-        无则熔知 LLM 兜底。
+      · subject（形式题材）—— 决策①改写：取炼真 structure（教程/观点/工具测评…），
+        不再用 summary.subject（后者是主题领域，改存 keywords）。
+      · keywords（关键词）—— 馏析视频 tag + 主题领域(summary.subject) 合并；
+        domain（主题域）交由熔知 classify 兜底填。
       · knowledge_type —— 决策 Y：覆盖 53 框架原"B/3 炼真产"，改归**熔知**派生（炼真无信号）。
       · 上述键若炼真未产出（值为空），frontmatter 不写，留空由熔知兜底，不被错误覆盖。
     """
     o = _to_dict(out)
     fm: dict = {}
+    inp = o.get("input_ref") or {}
 
-    # 必填：content_type（炼真产出）
-    ct = _str(o.get("content_type"))
+    # 必填：content_type（载体类型）—— 由输入来源平台检测，不写死。
+    # out.content_type 内部是「形式题材」(tutorial/opinion) 仅用于炼真路由，
+    # 对外输出的 content_type 必须反映「载体类型」，由来源平台决定。
+    ct = _detect_content_type(inp)
     if ct:
         fm["content_type"] = ct
+
+    # 来源平台 → 熔知 target_platform（抓手：炼真掌握来源信号，避免熔知重猜）。
+    # inp 即 input_ref（dataclasses.asdict 后 signals 仍在）；signals.platform
+    # 由 parser 从 transit frontmatter 读入。缺省不写（留空由熔知兜底）。
+    inp_signals = inp.get("signals") if isinstance(inp, dict) else getattr(inp, "signals", None)
+    plat = _str(inp_signals.get("platform")) if isinstance(inp_signals, dict) else ""
+    if not plat and isinstance(inp, dict):
+        plat = _str(inp.get("platform"))
+    if plat:
+        fm["target_platform"] = plat
+
+    # 溯源透传：标题 / UP主 / 来源链接 —— 从 input_ref 读入（parser 已从 transit frontmatter 提取）。
+    # 写入 frontmatter 后，熔知 classify_pipeline Layer 0.5 会读为「文件真相源」：
+    #   · title   → 抑制 LLM 标题漂移（验收 #3 三轮不一致）
+    #   · author  ← up_name → 填补 author 空值（溯源断链 #2）
+    #   · up_name → 原样透传，供熔知展示 UP主
+    #   · source_url → 填补来源链接空值（溯源断链 #2），让入库可点回原视频
+    # 空值不写，留空由熔知兜底（不被错误覆盖）。signals 嵌套作为兜底来源。
+    def _inp_str(key):
+        v = _str(inp.get(key)) if isinstance(inp, dict) else ""
+        if not v and isinstance(inp, dict):
+            sig = inp.get("signals") if isinstance(inp.get("signals"), dict) else {}
+            v = _str(sig.get(key)) if sig else ""
+        return v
+
+    t_title = _inp_str("title")
+    if t_title:
+        fm["title"] = t_title
+
+    t_up = _inp_str("up_name")
+    if t_up:
+        fm["author"] = t_up
+        fm["up_name"] = t_up
+
+    t_url = _inp_str("source_url")
+    if t_url:
+        fm["source_url"] = t_url
+
+    # 语言：炼真 refined 报告恒为中文（人读鉴定报告 + 中文摘要），显式声明 zh，
+    # 防止熔知 classify_pipeline 公开版 detect_language 兜底 en（验收 #1 误判）。
+    # 同时加入 _CONTRACT_KEYS 由熔知 hooks 强制覆盖，双保险。
+    fm["language"] = "zh"
 
     # 必填：epistemic_status / trust_score（compute_verdict 单一出口，0-5）
     verdict = o.get("verdict") or {}
@@ -924,19 +1019,31 @@ def build_ingestion_frontmatter(out) -> dict:
     if gist:
         fm["auto_summary"] = gist
 
-    # 决策①：subject（题材）—— 炼真提炼（summary.subject，LLM 产出），有则写入
-    subject = _str(summary.get("subject"))
-    if subject:
-        fm["subject"] = subject
+    # subject（形式题材）= 炼真 structure（教程/观点/工具测评…），从 out.content_type 取。
+    # summary.subject 是「主题领域」(如 Python编程)，属 domain 维度，不进 subject（改存 keywords）。
+    structure = _str(o.get("content_type"))
+    if structure:
+        fm["subject"] = structure
 
-    # 决策②：keywords（关键词）—— 馏析爬取视频 tag → 炼真原样传递（input_ref.keywords）
-    inp = o.get("input_ref") or {}
+    # keywords（关键词）= 馏析视频 tag + 主题领域(summary.subject) 合并。
+    # 退路：主题领域(如 Python编程)无专属字段，并入 keywords 避免丢失；domain 交由熔知兜底。
     inp_kw = inp.get("keywords") if isinstance(inp, dict) else getattr(inp, "keywords", None)
     kws = []
     if isinstance(inp_kw, (list, tuple)):
-        kws = [str(k).strip() for k in inp_kw if str(k).strip()][:8]
-        if kws:
-            fm["keywords"] = kws
+        kws = [str(k).strip() for k in inp_kw if str(k).strip()]
+    topic = _str(summary.get("subject"))
+    if topic and topic not in kws:
+        kws.append(topic)
+    kws = kws[:8]
+    if kws:
+        fm["keywords"] = kws
+
+    # A/2 搬运：发布时间（→ 熔知 timeline.published）
+    # 馏析爬取 pubdate → 炼真 parser 读入 input_ref.published → 此处原样输出 publish_date；
+    # 熔知 hooks.py _CONTRACT_KEYS 已注册 publish_date，强制覆盖 timeline.published。
+    inp_pub = inp.get("published") if isinstance(inp, dict) else getattr(inp, "published", "")
+    if inp_pub:
+        fm["publish_date"] = str(inp_pub)
 
     # 验真：ext_num1 自洽置信（§5.4）；ext_text1 验真方法（审计）
     tt = o.get("truth_track") or {}
@@ -984,46 +1091,78 @@ def build_ingestion_frontmatter(out) -> dict:
 def _dump_frontmatter(fm: dict) -> str:
     """把契约 dict 序列化为合法 YAML 块（§5.3 强制定 yaml.safe_dump）。
 
-    优先用 pyyaml（requirements 已含）；缺失时退化到内置最小发射器
-    （仅覆盖本契约已知标量/bool/list 类型），保证报告主交付物不因缺依赖而崩。
+    pyyaml 为本项目硬依赖（requirements 已含），不保留退化发射器：
+    依赖缺失应在安装/启动阶段暴露，而不是偷偷产出字段类型被 YAML 推断
+    改写（如 publish_date 被解析成 date 对象）的非法 frontmatter。
     """
-    if yaml is not None:
-        return yaml.safe_dump(fm, allow_unicode=True, sort_keys=False).rstrip()
-    return _fallback_yaml_dump(fm)
+    return yaml.safe_dump(fm, allow_unicode=True, sort_keys=False).rstrip()
 
 
-def _fallback_yaml_dump(fm: dict) -> str:
-    """pyyaml 缺失时的兜底 YAML 发射器（仅处理本契约字段类型）。"""
-    def q(s: str) -> str:
-        s = str(s).replace("\\", "\\\\").replace('"', '\\"')
-        return '"' + s + '"'
+# 注：pyyaml 为本项目硬依赖（requirements 已含），旧 _fallback_yaml_dump 退化发射器已删除。
+# 仅保留 yaml.safe_dump 一条序列化路径，杜绝 publish_date 等字段在缺依赖时被推断成 date 对象。
 
-    def need_quote(s: str) -> bool:
-        if s != s.strip() or s == "":
-            return True
-        return any(ch in s for ch in [": ", "#", "[", "]", "{", "}", "'", '"', "\n"])
-
-    lines = []
-    for k, v in fm.items():
-        if isinstance(v, bool):
-            lines.append(f"{k}: {'true' if v else 'false'}")
-        elif isinstance(v, (int, float)):
-            lines.append(f"{k}: {v}")
-        elif isinstance(v, list):
-            if not v:
-                lines.append(f"{k}: []")
-            else:
-                lines.append(f"{k}:")
-                for item in v:
-                    sv = str(item)
-                    lines.append(f"- {q(sv) if need_quote(sv) else sv}")
-        else:
-            sv = str(v)
-            lines.append(f"{k}: {q(sv) if need_quote(sv) else sv}")
+def _render_comments(o: dict, i: dict) -> str:
+    """A1：观众评论章节。评论是观众主观观点，不代表内容真实性（互动≠证据护栏）。"""
+    inp = i if i else o.get("input_ref") or {}
+    top = inp.get("comments_top") or []
+    pinned = inp.get("comments_pinned") or []
+    lines = ["## 💬 观众评论（观众观点 · 非证据）", ""]
+    lines.append("> ⚠️ 互动≠证据：评论是观众主观观点，不代表内容**真实性**，仅作受众反馈参考。")
+    lines.append("")
+    if not top and not pinned:
+        lines.append("_无评论数据_")
+        return "\n".join(lines)
+    if pinned:
+        lines.append("**置顶评论：**")
+        for c in pinned:
+            lines.append(f"- **{c.get('user', '匿名')}**（赞 {c.get('likes', '')}）：{c.get('text', '')}")
+        lines.append("")
+    if top:
+        lines.append("**高赞评论：**" if pinned else "**高赞评论：**")
+        for c in top:
+            lines.append(f"- **{c.get('user', '匿名')}**（赞 {c.get('likes', '')}）：{c.get('text', '')}")
     return "\n".join(lines)
 
 
-# ── A4 编排主入口 ──
+def _render_engagement(o: dict, i: dict) -> str:
+    """A2b：热度/口碑章节。互动数据只代表受欢迎程度，不代表内容可信（互动≠证据护栏）。"""
+    inp = i if i else o.get("input_ref") or {}
+    signals = inp.get("signals") or {}
+    eng = signals.get("engagement") or {}
+    lines = ["## 📊 热度 / 口碑（互动数据 · 非证据）", ""]
+    lines.append("> ⚠️ 互动≠证据：播放量/点赞/收藏等只代表视频**受欢迎程度**，不代表内容**可信**。高赞也可能在反驳。")
+    lines.append("")
+    if not eng:
+        lines.append("_无互动数据_")
+        return "\n".join(lines)
+    counts = [
+        ("播放", eng.get("view_count")),
+        ("点赞", eng.get("like_count")),
+        ("收藏", eng.get("favorite_count")),
+        ("投币", eng.get("coin_count")),
+        ("分享", eng.get("share_count")),
+        ("评论", eng.get("comment_count")),
+        ("弹幕(实时)", eng.get("danmaku_count")),
+        ("弹幕(抓取候选)", eng.get("danmaku_total_before")),
+    ]
+    lines.append("**互动计数：**")
+    for label, val in counts:
+        if val is not None:
+            lines.append(f"- {label}：{_fmt_int(val)}")
+    rates = [
+        ("点赞率", eng.get("like_rate")),
+        ("收藏率", eng.get("favorite_rate")),
+        ("投币率", eng.get("coin_rate")),
+    ]
+    rate_items = [(l, v) for l, v in rates if v is not None]
+    if rate_items:
+        lines.append("")
+        lines.append("**互动比率（%）：**")
+        for label, val in rate_items:
+            lines.append(f"- {label}：{val}%")
+    return "\n".join(lines)
+
+
 def render_report(out, inp=None) -> str:
     """渲染人读 Markdown 鉴定报告（ADR-004 单报告，主交付物）。
 
@@ -1061,6 +1200,8 @@ def render_report(out, inp=None) -> str:
             _render_key_sentences(o),
             _render_highlight_blocks(o),
             _render_provenance(o, i),
+            _render_comments(o, i),
+            _render_engagement(o, i),
             _render_numeric(o),
         ]
     else:
@@ -1073,6 +1214,8 @@ def render_report(out, inp=None) -> str:
             _render_merits(o),
             _render_structure(o),
             _render_provenance(o, i),
+            _render_comments(o, i),
+            _render_engagement(o, i),
             _render_numeric(o),
         ]
     return "\n".join(head + sections).rstrip() + "\n"

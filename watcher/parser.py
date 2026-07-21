@@ -53,6 +53,49 @@ def _num(v) -> float | None:
         return None
 
 
+def _fmt_int(v):
+    """互动计数可能是 float(如 2426.0)，展示时去小数点。"""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def _parse_engagement(fields: dict) -> dict:
+    """AI 设计决策（非用户指令，待确认）：从 Nigredo 中转 frontmatter 解析互动数据
+    进 signals["engagement"]。仅保留非 null 字段，缺失即不写，保证旧 transit 文件
+    缺字段时向后兼容、不崩。计数/比率原样搬运（Nigredo 已算好百分比），不重算避免漂移。
+    """
+    out = {}
+    for key in (
+        "view_count", "like_count", "coin_count", "favorite_count",
+        "share_count", "comment_count", "danmaku_count",
+        "like_rate", "favorite_rate", "coin_rate",
+    ):
+        v = _num(fields.get(key))
+        if v is not None:
+            out[key] = v
+    d_total = _num(fields.get("danmaku_total_before"))
+    if d_total is not None:
+        out["danmaku_total_before"] = d_total
+    return out
+
+
+def _parse_keywords(raw: str) -> list:
+    """transit① frontmatter 的 keywords 是 JSON 列表字符串（如 '["a", "b"]'），
+    解析为 str 列表；解析失败返回空列表（refine 输出侧对空有熔知 LLM 兜底）。
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(x).strip() for x in parsed if str(x).strip()]
+    except Exception:
+        pass
+    return []
+
+
 def _split_sections(body: str) -> dict[str, list[str]]:
     """按 '# 标题' 把正文切成 {标题: 行列表}（不含标题行本身）。"""
     sections: dict[str, list[str]] = {}
@@ -105,6 +148,12 @@ def parse_transit_md(path: str | Path) -> AlbedoInput:
             title=fields.get("title", ""),
             up_name=fields.get("up_name", ""),
             source_url=fields.get("source_url", ""),
+            keywords=_parse_keywords(fields.get("keywords", "")),
+            signals={
+                "platform": fields.get("platform", "bilibili"),
+                "engagement": _parse_engagement(fields),
+            },
+            published=fields.get("pubdate", "") or "",
         )
 
     # —— 字幕 ——
@@ -194,6 +243,12 @@ def parse_transit_md(path: str | Path) -> AlbedoInput:
         title=fields.get("title", ""),
         up_name=fields.get("up_name", ""),
         source_url=fields.get("source_url", ""),
+        keywords=_parse_keywords(fields.get("keywords", "")),
+        signals={
+            "platform": fields.get("platform", "bilibili"),
+            "engagement": _parse_engagement(fields),
+        },
+        published=fields.get("pubdate", "") or "",
         subtitle_lines=subtitle_lines,
         highlights=highlights,
         danmaku=danmaku,

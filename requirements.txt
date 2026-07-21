@@ -2,3 +2,11 @@ streamlit>=1.30
 requests>=2.31
 python-dotenv>=1.0
 pyyaml>=6.0
+numpy>=1.26          # 核心链路 flows/refine.py -> core/judgment.py 顶部硬依赖，漏装必崩
+
+# Layer2 深度验真（MiniCheck mDeBERTa-XNLI 逐条验真）已启用
+# 仅 core/minicheck_verify.py 用；模型权重需先于 E:/tmp/mdeberta_xnli 就位（local_files_only）
+# 默认装 CPU 版 torch（模型小，CPU 推理已足够快）；要 GPU 加速改 setup.bat 用 cu126 索引
+torch>=2.0
+transformers>=4.30
+
